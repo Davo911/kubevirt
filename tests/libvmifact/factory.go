@@ -27,7 +27,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/libvmi"
 	libvmici "kubevirt.io/kubevirt/pkg/libvmi/cloudinit"
 	"kubevirt.io/kubevirt/pkg/pointer"
-
+	"kubevirt.io/kubevirt/pkg/util/goarch"
 	cd "kubevirt.io/kubevirt/tests/containerdisk"
 )
 
@@ -98,6 +98,14 @@ func NewAlpineWithTestTooling(opts ...libvmi.Option) *kvirtv1.VirtualMachineInst
 }
 
 func NewGuestless(opts ...libvmi.Option) *kvirtv1.VirtualMachineInstance {
+	// s390x requires an initrd to boot, so we provide a tiny one here.
+	if isS390X() {
+		opts = append(
+			[]libvmi.Option{
+				libvmi.WithKernelBootContainerImage("disk0", cd.ContainerDiskFor(cd.ContainerDiskS390XGuestless)),
+			},
+			opts...)
+	}
 	opts = append(
 		[]libvmi.Option{libvmi.WithMemoryRequest(qemuMinimumMemory())},
 		opts...)
@@ -161,4 +169,8 @@ func WithDummyCloudForFastBoot() libvmici.NoCloudOption {
 	return func(source *kvirtv1.CloudInitNoCloudSource) {
 		source.UserDataBase64 = base64.StdEncoding.EncodeToString([]byte("#!/bin/bash\necho 'hello'\n"))
 	}
+}
+
+func isS390X() bool {
+	return goarch.RunTimeArch() == "s390x"
 }

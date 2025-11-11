@@ -398,6 +398,11 @@ oci_pull(
     image = "quay.io/kubevirt/fedora-realtime-container-disk",
 )
 
+oci_image(
+    name = "s390x_guestless_image",
+    dockerfile = "containerimages/s390x-guestless/Dockerfile",
+)
+
 oci_pull(
     name = "busybox",
     digest = "sha256:545e6a6310a27636260920bc07b994a299b6708a1b26910cfefd335fdfb60d2b",

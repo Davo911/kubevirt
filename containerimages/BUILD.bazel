@@ -101,6 +101,12 @@ oci_image(
 )
 
 oci_image(
+    name = "s390x-guestless",
+    base = "@s390x_guestless_image",
+    visibility = ["//visibility:public"],
+)
+
+oci_image(
     name = "alpine-with-test-tooling",
     base = select({
         "@io_bazel_rules_go//go/platform:linux_arm64": "@alpine_with_test_tooling",

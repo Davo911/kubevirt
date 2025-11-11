@@ -37,6 +37,7 @@ const (
 	ContainerDiskEmpty                ContainerDisk = "empty"
 	ContainerDiskFedoraRealtime       ContainerDisk = "fedora-realtime"
 	KernelBoot                        ContainerDisk = "alpine-ext-kernel-boot-demo"
+	ContainerDiskS390XGuestless       ContainerDisk = "s390x-guestless"
 )
 
 const (
@@ -70,6 +71,8 @@ func ContainerDiskFromRegistryFor(registry string, name ContainerDisk) string {
 		return fmt.Sprintf("%s/virtio-container-disk:%s", registry, flags.KubeVirtUtilityVersionTag)
 	case ContainerDiskFedoraTestTooling, ContainerDiskFedoraRealtime, ContainerDiskAlpineTestTooling:
 		return fmt.Sprintf("%s/%s-container-disk:%s", registry, name, flags.KubeVirtUtilityVersionTag)
+	case ContainerDiskS390XGuestless:
+		return fmt.Sprintf("%s/%s:%s", registry, name, flags.KubeVirtUtilityVersionTag)
 	case KernelBoot:
 		return fmt.Sprintf("%s/alpine-ext-kernel-boot-demo:%s", registry, flags.KubeVirtUtilityVersionTag)
 	}
