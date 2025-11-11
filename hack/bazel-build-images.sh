@@ -55,7 +55,6 @@ case ${ARCHITECTURE} in
 "s390x" | "crossbuild-s390x")
     other_images="
         $other_images_default
-        //containerimages:s390x-guestless
     "
     ;;
 "aarch64" | "crossbuild-aarch64")

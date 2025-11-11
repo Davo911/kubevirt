@@ -26,6 +26,13 @@ import (
 
 	"kubevirt.io/kubevirt/pkg/libvmi"
 	libvmici "kubevirt.io/kubevirt/pkg/libvmi/cloudinit"
+	"bytes"
+	"io/ioutil"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
 	"kubevirt.io/kubevirt/pkg/pointer"
 	"kubevirt.io/kubevirt/pkg/util/goarch"
 	cd "kubevirt.io/kubevirt/tests/containerdisk"
@@ -100,9 +107,13 @@ func NewAlpineWithTestTooling(opts ...libvmi.Option) *kvirtv1.VirtualMachineInst
 func NewGuestless(opts ...libvmi.Option) *kvirtv1.VirtualMachineInstance {
 	// s390x requires an initrd to boot, so we provide a tiny one here.
 	if isS390X() {
+		initrd, err := createInitrd()
+		if err != nil {
+			panic(err)
+		}
 		opts = append(
 			[]libvmi.Option{
-				libvmi.WithKernelBootContainerImage("disk0", cd.ContainerDiskFor(cd.ContainerDiskS390XGuestless)),
+				libvmi.WithKernelBootInitrd(initrd),
 			},
 			opts...)
 	}
@@ -173,4 +184,30 @@ func WithDummyCloudForFastBoot() libvmici.NoCloudOption {
 
 func isS390X() bool {
 	return goarch.RunTimeArch() == "s390x"
+}
+
+func createInitrd() (string, error) {
+	tempDir, err := ioutil.TempDir("", "initrd")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tempDir)
+
+	initScript := `#!/bin/sh
+poweroff -f
+`
+	if err := ioutil.WriteFile(filepath.Join(tempDir, "init"), []byte(initScript), 0755); err != nil {
+		return "", err
+	}
+
+	var buf bytes.Buffer
+	cmd := exec.Command("cpio", "-o", "-H", "newc")
+	cmd.Dir = tempDir
+	cmd.Stdout = &buf
+	cmd.Stdin = strings.NewReader("init")
+	if err := cmd.Run(); err != nil {
+		return "", err
+	}
+
+	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
 }

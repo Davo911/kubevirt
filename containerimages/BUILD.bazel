@@ -100,11 +100,6 @@ oci_image(
     visibility = ["//visibility:public"],
 )
 
-oci_image(
-    name = "s390x-guestless",
-    base = "@s390x_guestless_image",
-    visibility = ["//visibility:public"],
-)
 
 oci_image(
     name = "alpine-with-test-tooling",
