@@ -46,7 +46,6 @@ import (
 	cloudinit "kubevirt.io/kubevirt/pkg/cloud-init"
 	"kubevirt.io/kubevirt/pkg/config"
 	containerdisk "kubevirt.io/kubevirt/pkg/container-disk"
-	"kubevirt.io/kubevirt/pkg/downwardmetrics"
 	"kubevirt.io/kubevirt/pkg/emptydisk"
 	ephemeraldisk "kubevirt.io/kubevirt/pkg/ephemeral-disk"
 	cmdv1 "kubevirt.io/kubevirt/pkg/handler-launcher-com/cmd/v1"
@@ -59,7 +58,6 @@ import (
 	storagetypes "kubevirt.io/kubevirt/pkg/storage/types"
 	"kubevirt.io/kubevirt/pkg/util"
 	"kubevirt.io/kubevirt/pkg/virt-controller/services"
-	"kubevirt.io/kubevirt/pkg/virt-controller/watch/topology"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/converter/arch"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/converter/compute"
@@ -597,19 +595,6 @@ func toApiReadOnly(src bool) *api.ReadOnly {
 	return nil
 }
 
-// Add_Agent_To_api_Channel creates the channel for guest agent communication
-func Add_Agent_To_api_Channel() (channel api.Channel) {
-	channel.Type = "unix"
-	// let libvirt decide which path to use
-	channel.Source = nil
-	channel.Target = &api.ChannelTarget{
-		Name: "org.qemu.guest_agent.0",
-		Type: v1.VirtIO,
-	}
-
-	return
-}
-
 func Convert_v1_Volume_To_api_Disk(source *v1.Volume, disk *api.Disk, c *ConverterContext, diskIndex int) error {
 
 	if source.ContainerDisk != nil {
@@ -969,28 +954,6 @@ func Convert_v1_EphemeralVolumeSource_To_api_Disk(volumeName string, disk *api.D
 	return nil
 }
 
-func Convert_v1_Rng_To_api_Rng(_ *v1.Rng, rng *api.Rng, c *ConverterContext) error {
-
-	// default rng model for KVM/QEMU virtualization
-	rng.Model = virtio.InterpretTransitionalModelType(&c.UseVirtioTransitional, c.Architecture.GetArchitecture())
-
-	// default backend model, random
-	rng.Backend = &api.RngBackend{
-		Model: "random",
-	}
-
-	// the default source for rng is dev urandom
-	rng.Backend.Source = "/dev/urandom"
-
-	if c.UseLaunchSecuritySEV || c.UseLaunchSecurityPV {
-		rng.Driver = &api.RngDriver{
-			IOMMU: "on",
-		}
-	}
-
-	return nil
-}
-
 func Convert_v1_Usbredir_To_api_Usbredir(vmi *v1.VirtualMachineInstance, domainDevices *api.Devices, _ *ConverterContext) error {
 	clientDevices := vmi.Spec.Domain.Devices.ClientPassthrough
 
@@ -1070,54 +1033,6 @@ func Convert_v1_Input_To_api_InputDevice(input *v1.Input, inputDevice *api.Input
 	if input.Bus == v1.InputBusVirtio {
 		inputDevice.Model = v1.VirtIO
 	}
-	return nil
-}
-
-func Convert_v1_Clock_To_api_Clock(source *v1.Clock, clock *api.Clock) error {
-	if source.UTC != nil {
-		clock.Offset = "utc"
-		if source.UTC.OffsetSeconds != nil {
-			clock.Adjustment = strconv.Itoa(*source.UTC.OffsetSeconds)
-		} else {
-			clock.Adjustment = "reset"
-		}
-	} else if source.Timezone != nil {
-		clock.Offset = "timezone"
-		clock.Timezone = string(*source.Timezone)
-	}
-
-	if source.Timer != nil {
-		if source.Timer.RTC != nil {
-			newTimer := api.Timer{Name: "rtc"}
-			newTimer.Track = string(source.Timer.RTC.Track)
-			newTimer.TickPolicy = string(source.Timer.RTC.TickPolicy)
-			newTimer.Present = boolToYesNo(source.Timer.RTC.Enabled, true)
-			clock.Timer = append(clock.Timer, newTimer)
-		}
-		if source.Timer.PIT != nil {
-			newTimer := api.Timer{Name: "pit"}
-			newTimer.Present = boolToYesNo(source.Timer.PIT.Enabled, true)
-			newTimer.TickPolicy = string(source.Timer.PIT.TickPolicy)
-			clock.Timer = append(clock.Timer, newTimer)
-		}
-		if source.Timer.KVM != nil {
-			newTimer := api.Timer{Name: "kvmclock"}
-			newTimer.Present = boolToYesNo(source.Timer.KVM.Enabled, true)
-			clock.Timer = append(clock.Timer, newTimer)
-		}
-		if source.Timer.HPET != nil {
-			newTimer := api.Timer{Name: "hpet"}
-			newTimer.Present = boolToYesNo(source.Timer.HPET.Enabled, true)
-			newTimer.TickPolicy = string(source.Timer.HPET.TickPolicy)
-			clock.Timer = append(clock.Timer, newTimer)
-		}
-		if source.Timer.Hyperv != nil {
-			newTimer := api.Timer{Name: "hypervclock"}
-			newTimer.Present = boolToYesNo(source.Timer.Hyperv.Enabled, true)
-			clock.Timer = append(clock.Timer, newTimer)
-		}
-	}
-
 	return nil
 }
 
@@ -1558,6 +1473,8 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 	precond.MustNotBeNil(domain)
 	precond.MustNotBeNil(c)
 
+	architecture := c.Architecture.GetArchitecture()
+
 	builder := NewDomainBuilder(
 		metadata.DomainConfigurator{},
 		network.NewDomainConfigurator(
@@ -1566,6 +1483,16 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 			network.WithUseLaunchSecurityPV(c.UseLaunchSecurityPV),
 		),
 		compute.TPMDomainConfigurator{},
+		compute.VSOCKDomainConfigurator{},
+		compute.NewLaunchSecurityDomainConfigurator(architecture),
+		compute.ChannelsDomainConfigurator{},
+		compute.ClockDomainConfigurator{},
+		compute.NewRNGDomainConfigurator(
+			compute.RNGWithArchitecture(architecture),
+			compute.RNGWithUseVirtioTransitional(c.UseVirtioTransitional),
+			compute.RNGWithUseLaunchSecuritySEV(c.UseLaunchSecuritySEV),
+			compute.RNGWithUseLaunchSecurityPV(c.UseLaunchSecurityPV),
+		),
 	)
 	if err := builder.Build(vmi, domain); err != nil {
 		return err
@@ -1601,14 +1528,6 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 		return err
 	}
 
-	newChannel := Add_Agent_To_api_Channel()
-	domain.Spec.Devices.Channels = append(domain.Spec.Devices.Channels, newChannel)
-
-	if downwardmetrics.HasDevice(&vmi.Spec) {
-		// Handle downwardMetrics
-		domain.Spec.Devices.Channels = append(domain.Spec.Devices.Channels, convertDownwardMetricsChannel())
-	}
-
 	domain.Spec.SysInfo = &api.SysInfo{}
 
 	err = Convert_v1_Firmware_To_related_apis(vmi, domain, c)
@@ -1620,10 +1539,6 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 		controllerDriver = &api.ControllerDriver{
 			IOMMU: "on",
 		}
-	}
-
-	if util.UseLaunchSecurity(vmi) {
-		domain.Spec.LaunchSecurity = c.Architecture.LaunchSecurity(vmi)
 	}
 
 	if c.SMBios != nil {
@@ -1813,15 +1728,6 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 		domain.Spec.Devices.Watchdogs = append(domain.Spec.Devices.Watchdogs, *newWatchdog)
 	}
 
-	if vmi.Spec.Domain.Devices.Rng != nil {
-		newRng := &api.Rng{}
-		err := Convert_v1_Rng_To_api_Rng(vmi.Spec.Domain.Devices.Rng, newRng, c)
-		if err != nil {
-			return err
-		}
-		domain.Spec.Devices.Rng = newRng
-	}
-
 	domain.Spec.Devices.Ballooning = &api.MemBalloon{}
 	ConvertV1ToAPIBalloning(&vmi.Spec.Domain.Devices, domain.Spec.Devices.Ballooning, c)
 
@@ -1871,16 +1777,6 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 				},
 			},
 		)
-	}
-
-	if vmi.Spec.Domain.Clock != nil {
-		clock := vmi.Spec.Domain.Clock
-		newClock := &api.Clock{}
-		err := Convert_v1_Clock_To_api_Clock(clock, newClock)
-		if err != nil {
-			return err
-		}
-		domain.Spec.Clock = newClock
 	}
 
 	if vmi.Spec.Domain.Features != nil {
@@ -1951,17 +1847,6 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 				return err
 			}
 		}
-	}
-
-	// Make use of the tsc frequency topology hint
-	if topology.IsManualTSCFrequencyRequired(vmi) {
-		freq := *vmi.Status.TopologyHints.TSCFrequency
-		clock := domain.Spec.Clock
-		if clock == nil {
-			clock = &api.Clock{}
-		}
-		clock.Timer = append(clock.Timer, api.Timer{Name: "tsc", Frequency: strconv.FormatInt(freq, 10)})
-		domain.Spec.Clock = clock
 	}
 
 	domain.Spec.Devices.HostDevices = append(domain.Spec.Devices.HostDevices, c.GenericHostDevices...)
@@ -2066,19 +1951,6 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 				api.Arg{Value: fmt.Sprintf("file,id=firmwarelog,path=%s", QEMUSeaBiosDebugPipe)},
 				api.Arg{Value: "-device"},
 				api.Arg{Value: "isa-debugcon,iobase=0x402,chardev=firmwarelog"})
-		}
-	}
-
-	// Handle VSOCK CID
-	if vmi.Status.VSOCKCID != nil {
-		domain.Spec.Devices.VSOCK = &api.VSOCK{
-			// Force virtio v1 for vhost-vsock-pci.
-			// https://gitlab.com/qemu-project/qemu/-/commit/6209070503989cf4f28549f228989419d4f0b236
-			Model: "virtio-non-transitional",
-			CID: api.CID{
-				Auto:    "no",
-				Address: *vmi.Status.VSOCKCID,
-			},
 		}
 	}
 

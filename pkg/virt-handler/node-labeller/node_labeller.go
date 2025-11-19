@@ -70,7 +70,7 @@ type NodeLabeller struct {
 	logger                  *log.FilteredLogger
 	clusterConfig           *virtconfig.ClusterConfig
 	hypervFeatures          supportedFeatures
-	hostCapabilities        supportedFeatures
+	hostCapabilities        supportedModels
 	queue                   workqueue.TypedRateLimitingInterface[string]
 	supportedFeatures       []string
 	cpuModelVendor          string
@@ -116,7 +116,7 @@ func newNodeLabeller(clusterConfig *virtconfig.ClusterConfig, nodeClient k8scli.
 }
 
 // Run runs node-labeller
-func (n *NodeLabeller) Run(threadiness int, stop chan struct{}) {
+func (n *NodeLabeller) Run(stop chan struct{}) {
 	defer n.queue.ShutDown()
 
 	n.logger.Infof("node-labeller is running")
@@ -131,10 +131,8 @@ func (n *NodeLabeller) Run(threadiness int, stop chan struct{}) {
 
 	interval := 3 * time.Minute
 	go wait.JitterUntil(func() { n.queue.Add(n.host) }, interval, 1.2, true, stop)
+	go n.runWorker()
 
-	for i := 0; i < threadiness; i++ {
-		go wait.Until(n.runWorker, time.Second, stop)
-	}
 	<-stop
 }
 
@@ -248,6 +246,8 @@ func (n *NodeLabeller) prepareLabels(node *v1.Node) map[string]string {
 	if n.arch.supportsNamedModels() {
 		for _, value := range n.getSupportedCpuModels(obsoleteCPUsx86) {
 			newLabels[kubevirtv1.CPUModelLabel+value] = "true"
+		}
+		for _, value := range n.getKnownCpuModels(obsoleteCPUsx86) {
 			newLabels[kubevirtv1.SupportedHostModelMigrationCPU+value] = "true"
 		}
 	}
@@ -267,9 +267,7 @@ func (n *NodeLabeller) prepareLabels(node *v1.Node) map[string]string {
 	}
 
 	if n.arch.supportsHostModel() {
-		if _, hostModelObsolete := obsoleteCPUsx86[hostCpuModel.Name]; !hostModelObsolete {
-			newLabels[kubevirtv1.SupportedHostModelMigrationCPU+hostCpuModel.Name] = "true"
-		} else {
+		if _, hostModelObsolete := obsoleteCPUsx86[hostCpuModel.Name]; hostModelObsolete {
 			newLabels[kubevirtv1.NodeHostModelIsObsoleteLabel] = "true"
 			err := n.alertIfHostModelIsObsolete(node, hostCpuModel.Name, obsoleteCPUsx86)
 			if err != nil {

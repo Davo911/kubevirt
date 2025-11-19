@@ -39,6 +39,13 @@ const (
 	HotplugVolumesGate = "HotplugVolumes"
 	HostDiskGate       = "HostDisk"
 
+	// Owner: sig-storage
+	// Alpha: v1.7.0
+	//
+	// UtilityVolumes enables utility volumes feature which provides a general capability
+	// of hot-plugging volumes directly into the virt-launcher Pod for operational workflows
+	UtilityVolumesGate = "UtilityVolumes"
+
 	DownwardMetricsFeatureGate = "DownwardMetrics"
 	Root                       = "Root"
 	WorkloadEncryptionSEV      = "WorkloadEncryptionSEV"
@@ -52,12 +59,6 @@ const (
 	DisableMediatedDevicesHandling = "DisableMDEVConfiguration"
 	// PersistentReservation enables the use of the SCSI persistent reservation with the pr-helper daemon
 	PersistentReservation = "PersistentReservation"
-
-	// Owner: sig-compute / @lyarwood
-	// Alpha: v1.0.0
-	//
-	// MultiArchitecture allows VM/VMIs to request and schedule to an architecture other than that of control plane
-	MultiArchitecture = "MultiArchitecture"
 
 	// AlignCPUsGate allows emulator thread to assign two extra CPUs if needed to complete even parity.
 	AlignCPUsGate = "AlignCPUs"
@@ -173,7 +174,6 @@ func init() {
 	RegisterFeatureGate(FeatureGate{Name: KubevirtSeccompProfile, State: Beta})
 	RegisterFeatureGate(FeatureGate{Name: DisableMediatedDevicesHandling, State: Alpha})
 	RegisterFeatureGate(FeatureGate{Name: PersistentReservation, State: Alpha})
-	RegisterFeatureGate(FeatureGate{Name: MultiArchitecture, State: Alpha})
 	RegisterFeatureGate(FeatureGate{Name: AlignCPUsGate, State: Alpha})
 	RegisterFeatureGate(FeatureGate{Name: NodeRestrictionGate, State: Beta})
 	RegisterFeatureGate(FeatureGate{Name: VirtIOFSConfigVolumesGate, State: Alpha})
@@ -185,6 +185,7 @@ func init() {
 	RegisterFeatureGate(FeatureGate{Name: SecureExecution, State: Beta})
 	RegisterFeatureGate(FeatureGate{Name: VideoConfig, State: Beta})
 	RegisterFeatureGate(FeatureGate{Name: PanicDevicesGate, State: Beta})
+	RegisterFeatureGate(FeatureGate{Name: UtilityVolumesGate, State: Alpha})
 	RegisterFeatureGate(FeatureGate{Name: PasstIPStackMigration, State: Alpha})
 	RegisterFeatureGate(FeatureGate{Name: IncrementalBackupGate, State: Alpha})
 	RegisterFeatureGate(FeatureGate{Name: MigrationPriorityQueue, State: Alpha})

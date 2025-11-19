@@ -186,6 +186,14 @@ type VirtualMachineInstanceSpec struct {
 	// +listMapKey=name
 	// +optional
 	ResourceClaims []k8sv1.PodResourceClaim `json:"resourceClaims,omitempty"`
+	// List of utility volumes that can be mounted to the vmi virt-launcher pod
+	// without having a matching disk in the domain.
+	// Used to collect data for various operational workflows.
+	// +kubebuilder:validation:MaxItems:=256
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	UtilityVolumes []UtilityVolume `json:"utilityVolumes,omitempty"`
 }
 
 func (vmiSpec *VirtualMachineInstanceSpec) UnmarshalJSON(data []byte) error {
@@ -798,6 +806,8 @@ const (
 	// VirtualMachineInstanceMigrationAbortRequested indicates that live migration abort has been requested
 	VirtualMachineInstanceMigrationAbortRequested          VirtualMachineInstanceMigrationConditionType = "migrationAbortRequested"
 	VirtualMachineInstanceMigrationRejectedByResourceQuota VirtualMachineInstanceMigrationConditionType = "migrationRejectedByResourceQuota"
+	// VirtualMachineInstanceMigrationBlockedByUtilityVolumes indicates that migration is waiting for utility volumes to detach
+	VirtualMachineInstanceMigrationBlockedByUtilityVolumes VirtualMachineInstanceMigrationConditionType = "migrationBlockedByUtilityVolumes"
 )
 
 type VirtualMachineInstanceCondition struct {
@@ -1216,7 +1226,8 @@ const (
 	// Set By VM controller on VMIs to ensure VMIs are processed by VM controller during deletion
 	VirtualMachineControllerFinalizer        string = "kubevirt.io/virtualMachineControllerFinalize"
 	VirtualMachineInstanceMigrationFinalizer string = "kubevirt.io/migrationJobFinalize"
-	CPUManager                               string = "cpumanager"
+	DeprecatedCPUManager                     string = "cpumanager"
+	CPUManager                               string = "kubevirt.io/cpumanager"
 	// This annotation is used to inject ignition data
 	// Used on VirtualMachineInstance.
 	IgnitionAnnotation           string = "kubevirt.io/ignitiondata"
@@ -1269,6 +1280,10 @@ const (
 	// MigrationPendingPodTimeoutSecondsAnnotation represents a custom timeout period used for target pods stuck in pending for any reason
 	// This exists for functional testing
 	MigrationPendingPodTimeoutSecondsAnnotation string = "kubevirt.io/migrationPendingPodTimeoutSeconds"
+
+	// MigrationUtilityVolumesTimeoutSecondsAnnotation represents a custom timeout period for migrations waiting for utility volumes to detach
+	// Migration will stay in Pending state while utility volumes exist, and will fail if they are not removed before timeout
+	MigrationUtilityVolumesTimeoutSecondsAnnotation string = "kubevirt.io/migrationUtilityVolumesTimeoutSeconds"
 
 	// CustomLibvirtLogFiltersAnnotation can be used to customized libvirt log filters. Example value could be
 	// "3:remote 4:event 3:util.json 3:util.object 3:util.dbus 3:util.netlink 3:node_device 3:rpc 3:access 1:*".
@@ -2757,6 +2772,21 @@ type MigrateOptions struct {
 	AddedNodeSelector map[string]string `json:"addedNodeSelector,omitempty"`
 }
 
+// EvacuateCancelOptions may be provided on evacuate cancel request.
+type EvacuateCancelOptions struct {
+	metav1.TypeMeta `json:",inline"`
+	// When present, indicates that modifications should not be
+	// persisted. An invalid or unrecognized dryRun directive will
+	// result in an error response and no further processing of the
+	// request. Valid values are:
+	// - All: all dry run stages will be processed
+	// +optional
+	// +listType=atomic
+	DryRun []string `json:"dryRun,omitempty" protobuf:"bytes,1,rep,name=dryRun"`
+
+	EvacuationNodeName string `json:"evacuationNodeName"`
+}
+
 // VirtualMachineInstanceGuestAgentInfo represents information from the installed guest agent
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -3222,6 +3252,10 @@ type MigrationConfiguration struct {
 	// Hitting this timeout means a migration transferred 0 data for that many seconds. The migration is
 	// then considered stuck and therefore cancelled. Defaults to 150
 	ProgressTimeout *int64 `json:"progressTimeout,omitempty"`
+	// UtilityVolumesTimeout is the maximum number of seconds a migration can wait in Pending state
+	// for utility volumes to be detached. If utility volumes are still present after this timeout,
+	// the migration will be marked as Failed. Defaults to 150
+	UtilityVolumesTimeout *int64 `json:"utilityVolumesTimeout,omitempty"`
 	// UnsafeMigrationOverride allows live migrations to occur even if the compatibility check
 	// indicates the migration will be unsafe to the guest. Defaults to false
 	UnsafeMigrationOverride *bool `json:"unsafeMigrationOverride,omitempty"`

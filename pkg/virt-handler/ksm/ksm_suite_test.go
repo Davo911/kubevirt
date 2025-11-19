@@ -1,5 +1,5 @@
 /*
- * This file is part of the kubevirt project
+ * This file is part of the KubeVirt project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,25 +17,14 @@
  *
  */
 
-package converter
+package ksm
 
 import (
-	v1 "kubevirt.io/api/core/v1"
+	"testing"
 
-	"kubevirt.io/kubevirt/pkg/downwardmetrics"
-	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
+	"kubevirt.io/client-go/testutils"
 )
 
-func convertDownwardMetricsChannel() api.Channel {
-	return api.Channel{
-		Type: "unix",
-		Source: &api.ChannelSource{
-			Mode: "bind",
-			Path: downwardmetrics.DownwardMetricsChannelSocket,
-		},
-		Target: &api.ChannelTarget{
-			Type: v1.VirtIO,
-			Name: downwardmetrics.DownwardMetricsSerialDeviceName,
-		},
-	}
+func TestVirtHandler(t *testing.T) {
+	testutils.KubeVirtTestSuiteSetup(t)
 }

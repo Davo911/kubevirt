@@ -222,26 +222,6 @@ var _ = Describe("Converter", func() {
 
 	})
 
-	Context("with timezone", func() {
-		It("Should set timezone attribute", func() {
-			timezone := v1.ClockOffsetTimezone("America/New_York")
-			clock := &v1.Clock{
-				ClockOffset: v1.ClockOffset{
-					Timezone: &timezone,
-				},
-				Timer: &v1.Timer{},
-			}
-
-			var convertClock api.Clock
-			Convert_v1_Clock_To_api_Clock(clock, &convertClock)
-			data, err := xml.MarshalIndent(convertClock, "", "  ")
-			Expect(err).ToNot(HaveOccurred())
-
-			expectedClock := `<Clock offset="timezone" timezone="America/New_York"></Clock>`
-			Expect(string(data)).To(Equal(expectedClock))
-		})
-	})
-
 	Context("with v1.Disk", func() {
 		DescribeTable("Should define disk capacity as the minimum of capacity and request", func(arch string, requests, capacity, expected int64) {
 			context := &ConverterContext{Architecture: archconverter.NewConverter(arch)}
@@ -3539,11 +3519,6 @@ var _ = Describe("Converter", func() {
 		})
 
 		It("should set IOMMU attribute of the RngDriver", func() {
-			rng := &api.Rng{}
-			Expect(Convert_v1_Rng_To_api_Rng(&v1.Rng{}, rng, c)).To(Succeed())
-			Expect(rng.Driver).ToNot(BeNil())
-			Expect(rng.Driver.IOMMU).To(Equal("on"))
-
 			domain := vmiToDomain(vmi, c)
 			Expect(domain).ToNot(BeNil())
 			Expect(domain.Spec.Devices.Rng).ToNot(BeNil())
@@ -3638,11 +3613,6 @@ var _ = Describe("Converter", func() {
 		})
 
 		It("should set IOMMU attribute of the RngDriver", func() {
-			rng := &api.Rng{}
-			Expect(Convert_v1_Rng_To_api_Rng(&v1.Rng{}, rng, c)).To(Succeed())
-			Expect(rng.Driver).ToNot(BeNil())
-			Expect(rng.Driver.IOMMU).To(Equal("on"))
-
 			domain := vmiToDomain(vmi, c)
 			Expect(domain).ToNot(BeNil())
 			Expect(domain.Spec.Devices.Rng).ToNot(BeNil())

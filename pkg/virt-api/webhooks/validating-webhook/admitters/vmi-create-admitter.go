@@ -25,11 +25,8 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
-
-	"kubevirt.io/kubevirt/pkg/storage/utils"
 
 	admissionv1 "k8s.io/api/admission/v1"
 	k8sv1 "k8s.io/api/core/v1"
@@ -47,7 +44,8 @@ import (
 	"kubevirt.io/kubevirt/pkg/network/vmispec"
 	storageadmitters "kubevirt.io/kubevirt/pkg/storage/admitters"
 	"kubevirt.io/kubevirt/pkg/storage/reservation"
-	"kubevirt.io/kubevirt/pkg/storage/types"
+	storagetypes "kubevirt.io/kubevirt/pkg/storage/types"
+
 	hwutil "kubevirt.io/kubevirt/pkg/util/hardware"
 	webhookutils "kubevirt.io/kubevirt/pkg/util/webhooks"
 	"kubevirt.io/kubevirt/pkg/virt-api/webhooks"
@@ -197,7 +195,6 @@ func ValidateVirtualMachineInstanceSpec(field *k8sfield.Path, spec *v1.VirtualMa
 	causes = append(causes, validateRealtime(field, spec)...)
 	causes = append(causes, validateSpecAffinity(field, spec)...)
 	causes = append(causes, validateSpecTopologySpreadConstraints(field, spec)...)
-	causes = append(causes, validateArchitecture(field, spec, config)...)
 
 	netValidator := netadmitter.NewValidator(field, spec, config)
 	causes = append(causes, netValidator.Validate()...)
@@ -207,6 +204,7 @@ func ValidateVirtualMachineInstanceSpec(field *k8sfield.Path, spec *v1.VirtualMa
 	causes = append(causes, validateBootOrder(field, spec, config)...)
 
 	causes = append(causes, validateInputDevices(field, spec)...)
+
 	causes = append(causes, validateIOThreadsPolicy(field, spec)...)
 	causes = append(causes, validateProbe(field.Child("readinessProbe"), spec.ReadinessProbe)...)
 	causes = append(causes, validateProbe(field.Child("livenessProbe"), spec.LivenessProbe)...)
@@ -219,6 +217,7 @@ func ValidateVirtualMachineInstanceSpec(field *k8sfield.Path, spec *v1.VirtualMa
 	causes = append(causes, validateDomainSpec(field.Child("domain"), &spec.Domain)...)
 	causes = append(causes, validateVolumes(field.Child("volumes"), spec.Volumes, config)...)
 	causes = append(causes, storageadmitters.ValidateContainerDisks(field, spec)...)
+	causes = append(causes, storageadmitters.ValidateUtilityVolumesNotPresentOnCreation(field, spec)...)
 
 	causes = append(causes, validateAccessCredentials(field.Child("accessCredentials"), spec.AccessCredentials, spec.Volumes)...)
 
@@ -246,7 +245,7 @@ func validateFilesystemsWithVirtIOFSEnabled(field *k8sfield.Path, spec *v1.Virtu
 		return causes
 	}
 
-	volumes := types.GetVolumesByName(spec)
+	volumes := storagetypes.GetVolumesByName(spec)
 
 	for _, fs := range spec.Domain.Devices.Filesystems {
 		volume, ok := volumes[fs.Name]
@@ -255,13 +254,13 @@ func validateFilesystemsWithVirtIOFSEnabled(field *k8sfield.Path, spec *v1.Virtu
 		}
 
 		switch {
-		case utils.IsConfigVolume(volume) && (!config.VirtiofsConfigVolumesEnabled() && !config.OldVirtiofsEnabled()):
+		case storagetypes.IsConfigVolume(volume) && (!config.VirtiofsConfigVolumesEnabled() && !config.OldVirtiofsEnabled()):
 			causes = append(causes, metav1.StatusCause{
 				Type:    metav1.CauseTypeFieldValueInvalid,
 				Message: "virtiofs is not allowed: virtiofs feature gate is not enabled for config volumes",
 				Field:   field.Child("domain", "devices", "filesystems").String(),
 			})
-		case utils.IsStorageVolume(volume) && (!config.VirtiofsStorageEnabled() && !config.OldVirtiofsEnabled()):
+		case storagetypes.IsStorageVolume(volume) && (!config.VirtiofsStorageEnabled() && !config.OldVirtiofsEnabled()):
 			causes = append(causes, metav1.StatusCause{
 				Type:    metav1.CauseTypeFieldValueInvalid,
 				Message: "virtiofs is not allowed: virtiofs feature gate is not enabled for PVC",
@@ -1126,20 +1125,6 @@ func validateRealtime(field *k8sfield.Path, spec *v1.VirtualMachineInstanceSpec)
 	if spec.Domain.CPU != nil && spec.Domain.CPU.Realtime != nil {
 		causes = append(causes, validateCPURealtime(field, spec)...)
 		causes = append(causes, validateMemoryRealtime(field, spec)...)
-	}
-	return causes
-}
-
-func validateArchitecture(field *k8sfield.Path, spec *v1.VirtualMachineInstanceSpec, config *virtconfig.ClusterConfig) []metav1.StatusCause {
-	var causes []metav1.StatusCause
-	if spec.Architecture != "" && spec.Architecture != runtime.GOARCH && !config.MultiArchitectureEnabled() {
-		causes = append(causes, metav1.StatusCause{
-			Type: metav1.CauseTypeFieldValueRequired,
-			Message: fmt.Sprintf("%s feature gate is not enabled in kubevirt-config, invalid entry %s", featuregate.MultiArchitecture,
-				field.Child("architecture").String()),
-			Field: field.Child("architecture").String(),
-		})
-
 	}
 	return causes
 }

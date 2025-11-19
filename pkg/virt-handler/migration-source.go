@@ -186,7 +186,9 @@ func (c *MigrationSourceController) setMigrationProgressStatus(vmi *v1.VirtualMa
 	if migrationMetadata.UID != vmi.Status.MigrationState.MigrationUID {
 		return
 	}
-	vmi.Status.MigrationState.StartTimestamp = migrationMetadata.StartTimestamp
+	if migrationMetadata.StartTimestamp != nil {
+		vmi.Status.MigrationState.StartTimestamp = migrationMetadata.StartTimestamp
+	}
 
 	vmi.Status.MigrationState.Failed = migrationMetadata.Failed
 
@@ -254,6 +256,13 @@ func (c *MigrationSourceController) updateStatus(vmi *v1.VirtualMachineInstance,
 			c.logger.Object(vmi).Warning("the domain was never observed on the taget after the migration completed within the timeout period")
 			c.recorder.Event(vmi, k8sv1.EventTypeWarning, v1.Migrated.String(), fmt.Sprintf("The VirtualMachineInstance's domain was never observed on the target after the migration completed within the timeout period."))
 		}
+	}
+
+	if vmi.Status.Phase == v1.Failed && vmi.IsDecentralizedMigration() {
+		vmi.Status.MigrationState.Completed = true
+		vmi.Status.MigrationState.Failed = true
+		c.logger.Object(vmi).Warning("the decentralized migration failed due to the source VMI being failed")
+		c.recorder.Event(vmi, k8sv1.EventTypeWarning, v1.Migrated.String(), fmt.Sprintf("The VirtualMachineInstance's decentralized migration failed due to the source VMI being failed."))
 	}
 
 	if targetNodeDetectedDomain && vmi.IsDecentralizedMigration() && vmi.Status.MigrationState != nil && vmi.Status.MigrationState.Completed {
@@ -382,8 +391,10 @@ func (c *MigrationSourceController) execute(key string) error {
 		return err
 	}
 
-	if !vmiExists || vmi.IsFinal() || vmi.DeletionTimestamp != nil {
-		c.logger.V(4).Infof("vmi for key %v is terminating, final or does not exists", key)
+	if !vmiExists || ((vmi.IsDecentralizedMigration() && vmi.Status.Phase == v1.Succeeded) ||
+		!vmi.IsDecentralizedMigration() && vmi.IsFinal()) ||
+		vmi.DeletionTimestamp != nil {
+		c.logger.V(4).Infof("vmi for key %v is terminating, succeeded or does not exists", key)
 		return nil
 	}
 
