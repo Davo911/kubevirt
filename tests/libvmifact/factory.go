@@ -98,6 +98,11 @@ func NewAlpineWithTestTooling(opts ...libvmi.Option) *kvirtv1.VirtualMachineInst
 }
 
 func NewGuestless(opts ...libvmi.Option) *kvirtv1.VirtualMachineInstance {
+	if isS390X() {
+
+		//TODO: implement alpine as guestless for s390x
+		return NewAlpine(opts...)
+	}
 	opts = append(
 		[]libvmi.Option{libvmi.WithMemoryRequest(qemuMinimumMemory())},
 		opts...)
