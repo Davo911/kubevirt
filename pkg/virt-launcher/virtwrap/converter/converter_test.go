@@ -22,7 +22,6 @@ package converter
 import (
 	_ "embed"
 	"encoding/xml"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -112,115 +111,10 @@ func memBalloonWithModelAndPeriod(model string, period int) string {
 
 }
 
-var _ = Describe("getOptimalBlockIO", func() {
-
-	It("Should detect disk block sizes for a file DiskSource", func() {
-		disk := &api.Disk{
-			Source: api.DiskSource{
-				File: "/",
-			},
-		}
-		blockIO, err := getOptimalBlockIO(disk)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(blockIO.LogicalBlockSize).To(Equal(blockIO.PhysicalBlockSize))
-		// The default for most filesystems nowadays is 4096 but it can be changed.
-		// As such, relying on a specific value is flakey unless
-		// we create a disk image and filesystem just for this test.
-		// For now, as long as we have a value, the exact value doesn't matter.
-		Expect(blockIO.LogicalBlockSize).ToNot(BeZero())
-		Expect(blockIO.DiscardGranularity).ToNot(BeNil())
-		Expect(*blockIO.DiscardGranularity).To(Equal(blockIO.LogicalBlockSize))
-	})
-
-	It("Should fail for non-file or non-block devices", func() {
-		disk := &api.Disk{
-			Source: api.DiskSource{},
-		}
-		_, err := getOptimalBlockIO(disk)
-		Expect(err).To(HaveOccurred())
-	})
-})
-
 var _ = Describe("Converter", func() {
 
 	TestSmbios := &cmdv1.SMBios{}
 	EphemeralDiskImageCreator := &fake.MockEphemeralDiskImageCreator{BaseDir: "/var/run/libvirt/kubevirt-ephemeral-disk/"}
-
-	Context("with watchdog", func() {
-		DescribeTable("should successfully convert watchdog for supported architectures",
-			func(arch string, input *v1.Watchdog, expected *api.Watchdog) {
-				converter := archconverter.NewConverter(arch)
-				newWatchdog := &api.Watchdog{}
-				err := converter.ConvertWatchdog(input, newWatchdog)
-
-				Expect(err).ToNot(HaveOccurred())
-				Expect(newWatchdog).To(Equal(expected))
-			},
-
-			Entry("amd64 with I6300ESB",
-				"amd64",
-				&v1.Watchdog{
-					Name: "mywatchdog",
-					WatchdogDevice: v1.WatchdogDevice{
-						I6300ESB: &v1.I6300ESBWatchdog{
-							Action: v1.WatchdogActionPoweroff,
-						},
-					},
-				},
-				&api.Watchdog{
-					Alias:  api.NewUserDefinedAlias("mywatchdog"),
-					Model:  "i6300esb",
-					Action: "poweroff",
-				},
-			),
-
-			Entry("s390x with Diag288",
-				"s390x",
-				&v1.Watchdog{
-					Name: "diagwatchdog",
-					WatchdogDevice: v1.WatchdogDevice{
-						Diag288: &v1.Diag288Watchdog{
-							Action: v1.WatchdogActionReset,
-						},
-					},
-				},
-				&api.Watchdog{
-					Alias:  api.NewUserDefinedAlias("diagwatchdog"),
-					Model:  "diag288",
-					Action: "reset",
-				},
-			),
-		)
-		DescribeTable("should fail to convert watchdog for unsupported or invalid architectures",
-			func(arch string, input *v1.Watchdog, expectedErrMsg string) {
-				converter := archconverter.NewConverter(arch)
-				newWatchdog := &api.Watchdog{}
-				err := converter.ConvertWatchdog(input, newWatchdog)
-
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring(expectedErrMsg))
-			},
-
-			Entry("arm64 not supported",
-				"arm64",
-				&v1.Watchdog{Name: "unsupportedwatchdog"},
-				"not supported on architecture",
-			),
-
-			Entry("amd64 with no watchdog type",
-				"amd64",
-				&v1.Watchdog{Name: "emptywatchdog"},
-				"can't be mapped",
-			),
-
-			Entry("s390x with nil Diag288",
-				"s390x",
-				&v1.Watchdog{Name: "diagwatchdog"},
-				"can't be mapped",
-			),
-		)
-
-	})
 
 	Context("with v1.Disk", func() {
 		DescribeTable("Should define disk capacity as the minimum of capacity and request", func(arch string, requests, capacity, expected int64) {
@@ -409,10 +303,7 @@ var _ = Describe("Converter", func() {
 	Context("with v1.VirtualMachineInstance", func() {
 
 		var vmi *v1.VirtualMachineInstance
-		domainType := "kvm"
-		if _, err := os.Stat("/dev/kvm"); errors.Is(err, os.ErrNotExist) {
-			domainType = "qemu"
-		}
+		const domainType = "kvm"
 
 		BeforeEach(func() {
 
@@ -740,6 +631,7 @@ var _ = Describe("Converter", func() {
 					},
 				},
 				AllowEmulation:                  true,
+				KvmAvailable:                    true,
 				IsBlockPVC:                      isBlockPVCMap,
 				IsBlockDV:                       isBlockDVMap,
 				SMBios:                          TestSmbios,
@@ -1130,7 +1022,7 @@ var _ = Describe("Converter", func() {
 				libvmi.WithEphemeralPersistentVolumeClaim(blockPVCName, "test-ephemeral"),
 			)
 
-			domain := vmiToDomain(vmi, &ConverterContext{Architecture: archconverter.NewConverter(runtime.GOARCH), AllowEmulation: true, EphemeraldiskCreator: EphemeralDiskImageCreator, IsBlockPVC: isBlockPVCMap, IsBlockDV: isBlockDVMap})
+			domain := vmiToDomain(vmi, &ConverterContext{Architecture: archconverter.NewConverter(runtime.GOARCH), AllowEmulation: true, KvmAvailable: true, EphemeraldiskCreator: EphemeralDiskImageCreator, IsBlockPVC: isBlockPVCMap, IsBlockDV: isBlockDVMap})
 			By("Checking if the disk backing store type is block")
 			Expect(domain.Spec.Devices.Disks[0].BackingStore).ToNot(BeNil())
 			Expect(domain.Spec.Devices.Disks[0].BackingStore.Type).To(Equal("block"))
@@ -1792,6 +1684,41 @@ var _ = Describe("Converter", func() {
 		},
 			MultiArchEntry(""),
 		)
+
+		Context("BlockIO", func() {
+			It("Should detect disk block sizes for a file DiskSource", func() {
+				v1Disk := v1.Disk{
+					Name: "test",
+					BlockSize: &v1.BlockSize{
+						MatchVolume: &v1.FeatureState{Enabled: pointer.P(true)},
+					},
+				}
+				apiDisk := api.Disk{Source: api.DiskSource{File: "/"}}
+				Expect(Convert_v1_BlockSize_To_api_BlockIO(&v1Disk, &apiDisk)).To(Succeed())
+
+				blockIO := apiDisk.BlockIO
+				Expect(blockIO.LogicalBlockSize).To(Equal(blockIO.PhysicalBlockSize))
+				// The default for most filesystems nowadays is 4096 but it can be changed.
+				// As such, relying on a specific value is flakey unless
+				// we create a disk image and filesystem just for this test.
+				// For now, as long as we have a value, the exact value doesn't matter.
+				Expect(blockIO.LogicalBlockSize).ToNot(BeZero())
+				Expect(blockIO.DiscardGranularity).ToNot(BeNil())
+				Expect(*blockIO.DiscardGranularity).To(Equal(blockIO.LogicalBlockSize))
+			})
+
+			It("Should fail for non-file or non-block devices", func() {
+				const blockIoConfigErrorMessage = "failed to configure disk with block size detection enabled"
+				v1Disk := v1.Disk{
+					Name: "test",
+					BlockSize: &v1.BlockSize{
+						MatchVolume: &v1.FeatureState{Enabled: pointer.P(true)},
+					},
+				}
+				apiDisk := api.Disk{Source: api.DiskSource{}}
+				Expect(Convert_v1_BlockSize_To_api_BlockIO(&v1Disk, &apiDisk)).To(MatchError(ContainSubstring(blockIoConfigErrorMessage)))
+			})
+		})
 	})
 	Context("Network convert", func() {
 		var vmi *v1.VirtualMachineInstance
@@ -2037,7 +1964,7 @@ var _ = Describe("Converter", func() {
 			vmi.Spec.Domain.Devices = v1.Devices{
 				AutoattachGraphicsDevice: autoAttach,
 			}
-			domain := vmiToDomain(&vmi, &ConverterContext{AllowEmulation: true, Architecture: archconverter.NewConverter(arch)})
+			domain := vmiToDomain(&vmi, &ConverterContext{AllowEmulation: true, KvmAvailable: true, Architecture: archconverter.NewConverter(arch)})
 			Expect(domain.Spec.Devices.Video).To(HaveLen(devices))
 			Expect(domain.Spec.Devices.Graphics).To(HaveLen(devices))
 
@@ -2065,7 +1992,7 @@ var _ = Describe("Converter", func() {
 		DescribeTable("should check video device", func(arch string) {
 			const expectedVideoType = "test-video"
 			vmi := libvmi.New(libvmi.WithAutoattachGraphicsDevice(true), libvmi.WithVideo(expectedVideoType))
-			domain := vmiToDomain(vmi, &ConverterContext{AllowEmulation: true, Architecture: archconverter.NewConverter(arch)})
+			domain := vmiToDomain(vmi, &ConverterContext{AllowEmulation: true, KvmAvailable: true, Architecture: archconverter.NewConverter(arch)})
 			Expect(domain.Spec.Devices.Video[0].Model.Type).To(Equal(expectedVideoType))
 		},
 			MultiArchEntry("and use the explicitly set video device"),
@@ -2083,7 +2010,7 @@ var _ = Describe("Converter", func() {
 				},
 			}
 
-			domain := vmiToDomain(&vmi, &ConverterContext{Architecture: archconverter.NewConverter(arch), AllowEmulation: true})
+			domain := vmiToDomain(&vmi, &ConverterContext{Architecture: archconverter.NewConverter(arch), AllowEmulation: true, KvmAvailable: true})
 			Expect(domain.Spec.Devices.Graphics).To(HaveLen(1))
 			Expect(domain.Spec.Devices.Graphics).To(HaveExactElements(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 				"Type": Equal("vnc"),
@@ -2162,7 +2089,7 @@ var _ = Describe("Converter", func() {
 				},
 			}
 
-			domain := vmiToDomain(&vmi, &ConverterContext{Architecture: archconverter.NewConverter(runtime.GOARCH), AllowEmulation: true})
+			domain := vmiToDomain(&vmi, &ConverterContext{Architecture: archconverter.NewConverter(runtime.GOARCH), AllowEmulation: true, KvmAvailable: true})
 			Expect(domain.Spec.Features.Hyperv.Mode).To(Equal(api.HypervModePassthrough))
 		})
 	})
@@ -2192,7 +2119,7 @@ var _ = Describe("Converter", func() {
 			vmi.Spec.Domain.Devices = v1.Devices{
 				AutoattachSerialConsole: autoAttach,
 			}
-			domain := vmiToDomain(&vmi, &ConverterContext{Architecture: archconverter.NewConverter(runtime.GOARCH), AllowEmulation: true})
+			domain := vmiToDomain(&vmi, &ConverterContext{Architecture: archconverter.NewConverter(runtime.GOARCH), AllowEmulation: true, KvmAvailable: true})
 			Expect(domain.Spec.Devices.Serials).To(HaveLen(devices))
 			Expect(domain.Spec.Devices.Consoles).To(HaveLen(devices))
 
@@ -2206,7 +2133,7 @@ var _ = Describe("Converter", func() {
 	It("should not include serial entry in sysinfo when firmware.serial is not set", func() {
 		vmi := libvmi.New()
 		v1.SetObjectDefaults_VirtualMachineInstance(vmi)
-		domain := vmiToDomain(vmi, &ConverterContext{Architecture: archconverter.NewConverter(runtime.GOARCH), AllowEmulation: true})
+		domain := vmiToDomain(vmi, &ConverterContext{Architecture: archconverter.NewConverter(runtime.GOARCH), AllowEmulation: true, KvmAvailable: true})
 		Expect(domain.Spec.SysInfo.System).ToNot(ContainElement(HaveField("Name", Equal("serial"))),
 			"serial entry should not be present in sysinfo",
 		)
@@ -3527,11 +3454,6 @@ var _ = Describe("Converter", func() {
 		})
 
 		It("should set IOMMU attribute of the MemBalloonDriver", func() {
-			memBaloon := &api.MemBalloon{}
-			ConvertV1ToAPIBalloning(&v1.Devices{}, memBaloon, c)
-			Expect(memBaloon.Driver).ToNot(BeNil())
-			Expect(memBaloon.Driver.IOMMU).To(Equal("on"))
-
 			domain := vmiToDomain(vmi, c)
 			Expect(domain).ToNot(BeNil())
 			Expect(domain.Spec.Devices.Ballooning).ToNot(BeNil())
@@ -3621,11 +3543,6 @@ var _ = Describe("Converter", func() {
 		})
 
 		It("should set IOMMU attribute of the MemBalloonDriver", func() {
-			memBaloon := &api.MemBalloon{}
-			ConvertV1ToAPIBalloning(&v1.Devices{}, memBaloon, c)
-			Expect(memBaloon.Driver).ToNot(BeNil())
-			Expect(memBaloon.Driver.IOMMU).To(Equal("on"))
-
 			domain := vmiToDomain(vmi, c)
 			Expect(domain).ToNot(BeNil())
 			Expect(domain.Spec.Devices.Ballooning).ToNot(BeNil())
@@ -3992,7 +3909,7 @@ var _ = Describe("direct IO checker", func() {
 	})
 })
 
-var _ = Describe("SetDriverCacheMode", func() {
+var _ = Describe("Driver Cache and IO Settings", func() {
 	var ctrl *gomock.Controller
 	var mockDirectIOChecker *MockDirectIOChecker
 
@@ -4044,6 +3961,17 @@ var _ = Describe("SetDriverCacheMode", func() {
 		Entry("'writethrough' with direct io", string(v1.CacheWriteThrough), string(v1.CacheWriteThrough), expectCheckTrue),
 		Entry("'writethrough' without direct io", string(v1.CacheWriteThrough), string(v1.CacheWriteThrough), expectCheckFalse),
 		Entry("'writethrough' on error", string(v1.CacheWriteThrough), string(v1.CacheWriteThrough), expectCheckError),
+	)
+
+	DescribeTable("should set appropriate IO modes", func(disk *api.Disk, expectedIO v1.DriverIO, isPreAllocated bool) {
+		SetOptimalIOMode(disk, func(path string) bool { return isPreAllocated })
+		Expect(disk.Driver.IO).To(Equal(expectedIO))
+	},
+		Entry("user-specified IO", &api.Disk{Driver: &api.DiskDriver{IO: v1.IOThreads}}, v1.IOThreads, false),
+		Entry("sparse image", &api.Disk{Source: api.DiskSource{File: "test.img"}, Driver: &api.DiskDriver{}}, v1.DriverIO(""), false),
+		Entry("pre-allocated image with O_DIRECT", &api.Disk{Source: api.DiskSource{File: "test.img"}, Driver: &api.DiskDriver{Cache: string(v1.CacheNone)}}, v1.IONative, true),
+		Entry("pre-allocated image without O_DIRECT", &api.Disk{Source: api.DiskSource{File: "test.img"}, Driver: &api.DiskDriver{Cache: string(v1.CacheWriteThrough)}}, v1.DriverIO(""), true),
+		Entry("block device with O_DIRECT", &api.Disk{Source: api.DiskSource{Dev: "/dev/test"}, Driver: &api.DiskDriver{Cache: string(v1.CacheNone)}}, v1.IONative, true),
 	)
 })
 

@@ -183,7 +183,7 @@ var _ = Describe(SIG("Live Migration across namespaces", decorators.RequiresDece
 		It("should live migrate a container disk vm, several times", func() {
 			var targetVM *virtv1.VirtualMachine
 
-			sourceVMI := libvmifact.NewCirros(
+			sourceVMI := libvmifact.NewAlpine(
 				libvmi.WithNamespace(testsuite.NamespaceTestDefault),
 				libvmi.WithInterface(libvmi.InterfaceDeviceWithMasqueradeBinding()),
 				libvmi.WithNetwork(v1.DefaultPodNetwork()),
@@ -220,7 +220,7 @@ var _ = Describe(SIG("Live Migration across namespaces", decorators.RequiresDece
 				err = deleteMigration(targetMigration)
 				Expect(err).ToNot(HaveOccurred())
 				By("Checking that the VirtualMachineInstance console has expected output")
-				Expect(console.LoginToCirros(expectedVMI)).To(Succeed())
+				Expect(console.LoginToAlpine(expectedVMI)).To(Succeed())
 
 				By(fmt.Sprintf("deleting source VM %s/%s", sourceVM.Namespace, sourceVM.Name))
 				deleteVM(sourceVM)
@@ -625,9 +625,9 @@ var _ = Describe(SIG("Live Migration across namespaces", decorators.RequiresDece
 			libmigration.ConfirmVMIPostMigrationAborted(sourceVMI, string(sourceMigration.UID), timeout)
 
 			By("Waiting for the source migration object to disappear")
-			libwait.WaitForMigrationToDisappearWithTimeout(sourceMigration, timeout)
+			Expect(libwait.WaitForMigrationToDisappearWithTimeout(sourceMigration, timeout*time.Second)).To(Succeed())
 			By("Waiting for the target migration object to disappear")
-			libwait.WaitForMigrationToDisappearWithTimeout(targetMigration, timeout)
+			Expect(libwait.WaitForMigrationToDisappearWithTimeout(targetMigration, timeout*time.Second)).To(Succeed())
 			By("Logging in and ensuring the source VM is still running")
 			Expect(console.LoginToCirros(sourceVMI)).To(Succeed())
 			By("Checking that the receiving VM is in WaitingAsReceiver phase")
@@ -637,8 +637,8 @@ var _ = Describe(SIG("Live Migration across namespaces", decorators.RequiresDece
 				return targetVMI.Status.Phase
 			}).WithTimeout(time.Minute).WithPolling(2 * time.Second).Should(Equal(virtv1.WaitingForSync))
 		},
-			Entry("delete source migration", true),
-			Entry("delete target migration", false),
+			Entry("[QUARANTINE] delete source migration", decorators.Quarantine, true),
+			Entry("[QUARANTINE]delete target migration", decorators.Quarantine, false),
 		)
 
 		It("should properly propagate failure from target to source", func() {

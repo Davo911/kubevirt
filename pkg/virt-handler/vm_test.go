@@ -169,15 +169,18 @@ var _ = Describe("VirtualMachineInstance", func() {
 		mockHotplugVolumeMounter = hotplugvolume.NewMockVolumeMounter(ctrl)
 		mockCgroupManager = cgroup.NewMockManager(ctrl)
 
-		migrationProxy := migrationproxy.NewMigrationProxyManager(tlsConfig, tlsConfig, config)
+		migrationProxy := migrationproxy.NewMigrationProxyManager(tlsConfig, tlsConfig, tlsConfig, config)
 		fakeDownwardMetricsManager := newFakeManager()
 
 		launcherClientManager := &launcherclients.MockLauncherClientManager{
 			Initialized: true,
 		}
+		fakeNodeInformer, _ := testutils.NewFakeInformerFor(&k8sv1.Node{})
+		fakeNodeStore := fakeNodeInformer.GetStore()
 		controller, _ = NewVirtualMachineController(
 			recorder,
 			virtClient,
+			fakeNodeStore,
 			host,
 			privateDir,
 			podsDir,

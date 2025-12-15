@@ -122,6 +122,7 @@ var getCgroupManager = func(vmi *v1.VirtualMachineInstance, host string) (cgroup
 func NewVirtualMachineController(
 	recorder record.EventRecorder,
 	clientset kubecli.KubevirtClient,
+	nodeStore cache.Store,
 	host string,
 	virtPrivateDir string,
 	kubeletPodsDir string,
@@ -228,7 +229,7 @@ func NewVirtualMachineController(
 		permissions,
 		deviceManager.PermanentHostDevicePlugins(maxDevices, permissions),
 		clusterConfig,
-		clientset.CoreV1())
+		nodeStore)
 	c.heartBeat = heartbeat.NewHeartBeat(clientset.CoreV1(), c.deviceManagerController, clusterConfig, host)
 
 	return c, nil
@@ -1022,6 +1023,7 @@ func (c *VirtualMachineController) updateVMIStatusFromDomain(vmi *v1.VirtualMach
 	c.updateGuestInfoFromDomain(vmi, domain)
 	c.updateVolumeStatusesFromDomain(vmi, domain)
 	c.updateFSFreezeStatus(vmi, domain)
+	c.updateBackupStatus(vmi, domain)
 	c.updateMachineType(vmi, domain)
 	if err = c.updateMemoryInfo(vmi, domain); err != nil {
 		return err
@@ -2453,4 +2455,25 @@ func parseLibvirtQuantity(value int64, unit string) *resource.Quantity {
 		return resource.NewQuantity(value*1024*1024*1024*1024, resource.BinarySI)
 	}
 	return nil
+}
+
+func (c *VirtualMachineController) updateBackupStatus(vmi *v1.VirtualMachineInstance, domain *api.Domain) {
+	if domain == nil ||
+		domain.Spec.Metadata.KubeVirt.Backup == nil ||
+		vmi.Status.ChangedBlockTracking == nil ||
+		vmi.Status.ChangedBlockTracking.BackupStatus == nil {
+		return
+	}
+	backupMetadata := domain.Spec.Metadata.KubeVirt.Backup
+	vmi.Status.ChangedBlockTracking.BackupStatus.Completed = backupMetadata.Completed
+	if backupMetadata.StartTimestamp != nil {
+		vmi.Status.ChangedBlockTracking.BackupStatus.StartTimestamp = backupMetadata.StartTimestamp
+	}
+	if backupMetadata.EndTimestamp != nil {
+		vmi.Status.ChangedBlockTracking.BackupStatus.EndTimestamp = backupMetadata.EndTimestamp
+	}
+	if backupMetadata.BackupMsg != "" {
+		vmi.Status.ChangedBlockTracking.BackupStatus.BackupMsg = &backupMetadata.BackupMsg
+	}
+	// TODO: Handle backup failure (backupMetadata.Failed) and abort status (backupMetadata.AbortStatus)
 }

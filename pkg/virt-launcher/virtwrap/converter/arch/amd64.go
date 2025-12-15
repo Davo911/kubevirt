@@ -17,11 +17,8 @@
 package arch
 
 import (
-	"fmt"
-
 	v1 "kubevirt.io/api/core/v1"
 
-	"kubevirt.io/kubevirt/pkg/pointer"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/device"
 )
@@ -33,30 +30,6 @@ type converterAMD64 struct{}
 
 func (converterAMD64) GetArchitecture() string {
 	return amd64
-}
-
-func (converterAMD64) AddGraphicsDevice(_ *v1.VirtualMachineInstance, domain *api.Domain, isEFI bool) {
-	// For AMD64 + EFI, use bochs. For BIOS, use VGA
-	if isEFI {
-		domain.Spec.Devices.Video = []api.Video{
-			{
-				Model: api.VideoModel{
-					Type:  "bochs",
-					Heads: pointer.P(graphicsDeviceDefaultHeads),
-				},
-			},
-		}
-	} else {
-		domain.Spec.Devices.Video = []api.Video{
-			{
-				Model: api.VideoModel{
-					Type:  "vga",
-					Heads: pointer.P(graphicsDeviceDefaultHeads),
-					VRam:  pointer.P(graphicsDeviceDefaultVRAM),
-				},
-			},
-		}
-	}
 }
 
 func (converterAMD64) ScsiController(model string, driver *api.ControllerDriver) api.Controller {
@@ -115,16 +88,6 @@ func (converterAMD64) ShouldVerboseLogsBeEnabled() bool {
 
 func (converterAMD64) HasVMPort() bool {
 	return true
-}
-
-func (converterAMD64) ConvertWatchdog(source *v1.Watchdog, watchdog *api.Watchdog) error {
-	watchdog.Alias = api.NewUserDefinedAlias(source.Name)
-	if source.I6300ESB != nil {
-		watchdog.Model = "i6300esb"
-		watchdog.Action = string(source.I6300ESB.Action)
-		return nil
-	}
-	return fmt.Errorf("watchdog %s can't be mapped, no watchdog type specified", source.Name)
 }
 
 func (converterAMD64) SupportPCIHole64Disabling() bool {

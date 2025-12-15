@@ -253,14 +253,7 @@ func validateFilesystemsWithVirtIOFSEnabled(field *k8sfield.Path, spec *v1.Virtu
 			continue
 		}
 
-		switch {
-		case storagetypes.IsConfigVolume(volume) && (!config.VirtiofsConfigVolumesEnabled() && !config.OldVirtiofsEnabled()):
-			causes = append(causes, metav1.StatusCause{
-				Type:    metav1.CauseTypeFieldValueInvalid,
-				Message: "virtiofs is not allowed: virtiofs feature gate is not enabled for config volumes",
-				Field:   field.Child("domain", "devices", "filesystems").String(),
-			})
-		case storagetypes.IsStorageVolume(volume) && (!config.VirtiofsStorageEnabled() && !config.OldVirtiofsEnabled()):
+		if storagetypes.IsStorageVolume(volume) && (!config.VirtiofsStorageEnabled()) {
 			causes = append(causes, metav1.StatusCause{
 				Type:    metav1.CauseTypeFieldValueInvalid,
 				Message: "virtiofs is not allowed: virtiofs feature gate is not enabled for PVC",
@@ -1004,11 +997,11 @@ func validateHugepagesMemoryRequests(field *k8sfield.Path, spec *v1.VirtualMachi
 		causes = append(causes, metav1.StatusCause{
 			Type: metav1.CauseTypeFieldValueInvalid,
 			Message: fmt.Sprintf("%s '%s': %s",
-				field.Child("domain", "hugepages", "size").String(),
+				field.Child("domain", "memory", "hugepages", "pageSize").String(),
 				spec.Domain.Memory.Hugepages.PageSize,
 				resource.ErrFormatWrong,
 			),
-			Field: field.Child("domain", "hugepages", "size").String(),
+			Field: field.Child("domain", "memory", "hugepages", "pageSize").String(),
 		})
 		return causes
 	}
@@ -1025,7 +1018,7 @@ func validateHugepagesMemoryRequests(field *k8sfield.Path, spec *v1.VirtualMachi
 			Message: fmt.Sprintf("%s '%s' must be equal to or larger than page size %s '%s'",
 				field.Child("domain", "resources", "requests", "memory").String(),
 				spec.Domain.Resources.Requests.Memory(),
-				field.Child("domain", "hugepages", "size").String(),
+				field.Child("domain", "memory", "hugepages", "pageSize").String(),
 				spec.Domain.Memory.Hugepages.PageSize,
 			),
 			Field: field.Child("domain", "resources", "requests", "memory").String(),
@@ -1036,7 +1029,7 @@ func validateHugepagesMemoryRequests(field *k8sfield.Path, spec *v1.VirtualMachi
 			Message: fmt.Sprintf("%s '%s' is not a multiple of the page size %s '%s'",
 				field.Child("domain", "resources", "requests", "memory").String(),
 				spec.Domain.Resources.Requests.Memory(),
-				field.Child("domain", "hugepages", "size").String(),
+				field.Child("domain", "memory", "hugepages", "pageSize").String(),
 				spec.Domain.Memory.Hugepages.PageSize,
 			),
 			Field: field.Child("domain", "resources", "requests", "memory").String(),
@@ -1184,7 +1177,7 @@ func ValidateVirtualMachineInstanceMandatoryFields(field *k8sfield.Path, spec *v
 			Type: metav1.CauseTypeFieldValueRequired,
 			Message: fmt.Sprintf("no memory requested, at least one of '%s', '%s' or '%s' must be set",
 				field.Child("domain", "memory", "guest").String(),
-				field.Child("domain", "memory", "hugepages", "size").String(),
+				field.Child("domain", "memory", "hugepages", "pageSize").String(),
 				field.Child("domain", "resources", "requests", "memory").String()),
 		})
 	}

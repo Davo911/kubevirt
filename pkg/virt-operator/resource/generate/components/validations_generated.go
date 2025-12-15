@@ -237,15 +237,13 @@ var CRDsValidation map[string]string = map[string]string{
                 volumeAttributesClassName may be used to set the VolumeAttributesClass used by this claim.
                 If specified, the CSI driver will create or update the volume with the attributes defined
                 in the corresponding VolumeAttributesClass. This has a different purpose than storageClassName,
-                it can be changed after the claim is created. An empty string value means that no VolumeAttributesClass
-                will be applied to the claim but it's not allowed to reset this field to empty string once it is set.
-                If unspecified and the PersistentVolumeClaim is unbound, the default VolumeAttributesClass
-                will be set by the persistentvolume controller if it exists.
+                it can be changed after the claim is created. An empty string or nil value indicates that no
+                VolumeAttributesClass will be applied to the claim. If the claim enters an Infeasible error state,
+                this field can be reset to its previous value (including nil) to cancel the modification.
                 If the resource referred to by volumeAttributesClass does not exist, this PersistentVolumeClaim will be
                 set to a Pending state, as reflected by the modifyVolumeStatus field, until such as a resource
                 exists.
                 More info: https://kubernetes.io/docs/concepts/storage/volume-attributes-classes/
-                (Beta) Using this field requires the VolumeAttributesClass feature gate to be enabled (off by default).
               type: string
             volumeMode:
               description: |-
@@ -2411,8 +2409,8 @@ var CRDsValidation map[string]string = map[string]string{
                             most preferred is the one with the greatest sum of weights, i.e.
                             for each node that meets all of the scheduling requirements (resource
                             request, requiredDuringScheduling anti-affinity expressions, etc.),
-                            compute a sum by iterating through the elements of this field and adding
-                            "weight" to the sum if the node has pods which matches the corresponding podAffinityTerm; the
+                            compute a sum by iterating through the elements of this field and subtracting
+                            "weight" from the sum if the node has pods which matches the corresponding podAffinityTerm; the
                             node(s) with the highest sum are the most preferred.
                           items:
                             description: The weights of all of the matched WeightedPodAffinityTerm
@@ -3477,8 +3475,8 @@ var CRDsValidation map[string]string = map[string]string{
                             most preferred is the one with the greatest sum of weights, i.e.
                             for each node that meets all of the scheduling requirements (resource
                             request, requiredDuringScheduling anti-affinity expressions, etc.),
-                            compute a sum by iterating through the elements of this field and adding
-                            "weight" to the sum if the node has pods which matches the corresponding podAffinityTerm; the
+                            compute a sum by iterating through the elements of this field and subtracting
+                            "weight" from the sum if the node has pods which matches the corresponding podAffinityTerm; the
                             node(s) with the highest sum are the most preferred.
                           items:
                             description: The weights of all of the matched WeightedPodAffinityTerm
@@ -4317,15 +4315,13 @@ var CRDsValidation map[string]string = map[string]string{
                           volumeAttributesClassName may be used to set the VolumeAttributesClass used by this claim.
                           If specified, the CSI driver will create or update the volume with the attributes defined
                           in the corresponding VolumeAttributesClass. This has a different purpose than storageClassName,
-                          it can be changed after the claim is created. An empty string value means that no VolumeAttributesClass
-                          will be applied to the claim but it's not allowed to reset this field to empty string once it is set.
-                          If unspecified and the PersistentVolumeClaim is unbound, the default VolumeAttributesClass
-                          will be set by the persistentvolume controller if it exists.
+                          it can be changed after the claim is created. An empty string or nil value indicates that no
+                          VolumeAttributesClass will be applied to the claim. If the claim enters an Infeasible error state,
+                          this field can be reset to its previous value (including nil) to cancel the modification.
                           If the resource referred to by volumeAttributesClass does not exist, this PersistentVolumeClaim will be
                           set to a Pending state, as reflected by the modifyVolumeStatus field, until such as a resource
                           exists.
                           More info: https://kubernetes.io/docs/concepts/storage/volume-attributes-classes/
-                          (Beta) Using this field requires the VolumeAttributesClass feature gate to be enabled (off by default).
                         type: string
                       volumeMode:
                         description: |-
@@ -4788,6 +4784,12 @@ var CRDsValidation map[string]string = map[string]string{
           description: |-
             Running state indicates the requested running state of the VirtualMachineInstance
             mutually exclusive with Running
+            Following are allowed values:
+            - "Always": VMI should always be running.
+            - "Halted": VMI should never be running.
+            - "Manual": VMI can be started/stopped using API endpoints.
+            - "RerunOnFailure": VMI will initially be running and restarted if a failure occurs, but will not be restarted upon successful completion.
+            - "Once": VMI will run once and not be restarted upon completion regardless if the completion is of phase Failure or Success.
           type: string
         running:
           description: |-
@@ -5484,8 +5486,8 @@ var CRDsValidation map[string]string = map[string]string{
                             most preferred is the one with the greatest sum of weights, i.e.
                             for each node that meets all of the scheduling requirements (resource
                             request, requiredDuringScheduling anti-affinity expressions, etc.),
-                            compute a sum by iterating through the elements of this field and adding
-                            "weight" to the sum if the node has pods which matches the corresponding podAffinityTerm; the
+                            compute a sum by iterating through the elements of this field and subtracting
+                            "weight" from the sum if the node has pods which matches the corresponding podAffinityTerm; the
                             node(s) with the highest sum are the most preferred.
                           items:
                             description: The weights of all of the matched WeightedPodAffinityTerm
@@ -8319,6 +8321,30 @@ var CRDsValidation map[string]string = map[string]string{
           description: ChangedBlockTracking represents the status of the changedBlockTracking
           nullable: true
           properties:
+            backupStatus:
+              description: BackupStatus represents the status of vmi backup
+              nullable: true
+              properties:
+                backupMsg:
+                  description: |-
+                    BackupMsg resturns any relevant information like failure reason
+                    unfreeze failed etc...
+                  type: string
+                backupName:
+                  description: BackupName is the name of the executed backup
+                  type: string
+                completed:
+                  description: Completed indicates the backup completed
+                  type: boolean
+                endTimestamp:
+                  description: EndTimestamp is the timestamp when the backup ended
+                  format: date-time
+                  type: string
+                startTimestamp:
+                  description: StartTimestamp is the timestamp when the backup started
+                  format: date-time
+                  type: string
+              type: object
             state:
               description: State represents the current CBT state
               type: string
@@ -8916,6 +8942,107 @@ var CRDsValidation map[string]string = map[string]string{
                   x-kubernetes-list-type: atomic
               type: object
           type: object
+      type: object
+  required:
+  - spec
+  type: object
+`,
+	"virtualmachinebackup": `openAPIV3Schema:
+  description: VirtualMachineBackup defines the operation of backing up a VM
+  properties:
+    apiVersion:
+      description: |-
+        APIVersion defines the versioned schema of this representation of an object.
+        Servers should convert recognized schemas to the latest internal value, and
+        may reject unrecognized values.
+        More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+      type: string
+    kind:
+      description: |-
+        Kind is a string value representing the REST resource this object represents.
+        Servers may infer this from the endpoint the client submits requests to.
+        Cannot be updated.
+        In CamelCase.
+        More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+      type: string
+    metadata:
+      type: object
+    spec:
+      description: VirtualMachineBackupSpec is the spec for a VirtualMachineBackup
+        resource
+      properties:
+        forceFullBackup:
+          description: ForceFullBackup indicates that a full backup is desired
+          type: boolean
+        mode:
+          description: Mode specifies the way the backup output will be recieved
+          type: string
+        pvcName:
+          description: |-
+            PvcName required in push mode. Specifies the name of the PVC
+            where the backup output will be stored
+          type: string
+        skipQuiesce:
+          description: SkipQuiesce indicates whether the VM's filesystem shoule not
+            be quiesced before the backup
+          type: boolean
+        source:
+          description: |-
+            Source specifies the VM to backup
+            If not provided, a reference to a VirtualMachineBackupTracker must be specified instead
+          properties:
+            apiGroup:
+              description: |-
+                APIGroup is the group for the resource being referenced.
+                If APIGroup is not specified, the specified Kind must be in the core API group.
+                For any other third-party types, APIGroup is required.
+              type: string
+            kind:
+              description: Kind is the type of resource being referenced
+              type: string
+            name:
+              description: Name is the name of resource being referenced
+              type: string
+          required:
+          - kind
+          - name
+          type: object
+          x-kubernetes-map-type: atomic
+      type: object
+    status:
+      description: VirtualMachineBackupStatus is the status for a VirtualMachineBackup
+        resource
+      properties:
+        conditions:
+          items:
+            description: Condition defines conditions
+            properties:
+              lastProbeTime:
+                format: date-time
+                nullable: true
+                type: string
+              lastTransitionTime:
+                format: date-time
+                nullable: true
+                type: string
+              message:
+                type: string
+              reason:
+                type: string
+              status:
+                type: string
+              type:
+                description: ConditionType is the const type for Conditions
+                type: string
+            required:
+            - status
+            - type
+            type: object
+          type: array
+          x-kubernetes-list-type: atomic
+        type:
+          description: Type indicates if the backup was full or incremental
+          type: string
       type: object
   required:
   - spec
@@ -11020,8 +11147,8 @@ var CRDsValidation map[string]string = map[string]string{
                     most preferred is the one with the greatest sum of weights, i.e.
                     for each node that meets all of the scheduling requirements (resource
                     request, requiredDuringScheduling anti-affinity expressions, etc.),
-                    compute a sum by iterating through the elements of this field and adding
-                    "weight" to the sum if the node has pods which matches the corresponding podAffinityTerm; the
+                    compute a sum by iterating through the elements of this field and subtracting
+                    "weight" from the sum if the node has pods which matches the corresponding podAffinityTerm; the
                     node(s) with the highest sum are the most preferred.
                   items:
                     description: The weights of all of the matched WeightedPodAffinityTerm
@@ -13820,6 +13947,30 @@ var CRDsValidation map[string]string = map[string]string{
           description: ChangedBlockTracking represents the status of the changedBlockTracking
           nullable: true
           properties:
+            backupStatus:
+              description: BackupStatus represents the status of vmi backup
+              nullable: true
+              properties:
+                backupMsg:
+                  description: |-
+                    BackupMsg resturns any relevant information like failure reason
+                    unfreeze failed etc...
+                  type: string
+                backupName:
+                  description: BackupName is the name of the executed backup
+                  type: string
+                completed:
+                  description: Completed indicates the backup completed
+                  type: boolean
+                endTimestamp:
+                  description: EndTimestamp is the timestamp when the backup ended
+                  format: date-time
+                  type: string
+                startTimestamp:
+                  description: StartTimestamp is the timestamp when the backup started
+                  format: date-time
+                  type: string
+              type: object
             state:
               description: State represents the current CBT state
               type: string
@@ -17262,8 +17413,8 @@ var CRDsValidation map[string]string = map[string]string{
                             most preferred is the one with the greatest sum of weights, i.e.
                             for each node that meets all of the scheduling requirements (resource
                             request, requiredDuringScheduling anti-affinity expressions, etc.),
-                            compute a sum by iterating through the elements of this field and adding
-                            "weight" to the sum if the node has pods which matches the corresponding podAffinityTerm; the
+                            compute a sum by iterating through the elements of this field and subtracting
+                            "weight" from the sum if the node has pods which matches the corresponding podAffinityTerm; the
                             node(s) with the highest sum are the most preferred.
                           items:
                             description: The weights of all of the matched WeightedPodAffinityTerm
@@ -21046,15 +21197,13 @@ var CRDsValidation map[string]string = map[string]string{
                                   volumeAttributesClassName may be used to set the VolumeAttributesClass used by this claim.
                                   If specified, the CSI driver will create or update the volume with the attributes defined
                                   in the corresponding VolumeAttributesClass. This has a different purpose than storageClassName,
-                                  it can be changed after the claim is created. An empty string value means that no VolumeAttributesClass
-                                  will be applied to the claim but it's not allowed to reset this field to empty string once it is set.
-                                  If unspecified and the PersistentVolumeClaim is unbound, the default VolumeAttributesClass
-                                  will be set by the persistentvolume controller if it exists.
+                                  it can be changed after the claim is created. An empty string or nil value indicates that no
+                                  VolumeAttributesClass will be applied to the claim. If the claim enters an Infeasible error state,
+                                  this field can be reset to its previous value (including nil) to cancel the modification.
                                   If the resource referred to by volumeAttributesClass does not exist, this PersistentVolumeClaim will be
                                   set to a Pending state, as reflected by the modifyVolumeStatus field, until such as a resource
                                   exists.
                                   More info: https://kubernetes.io/docs/concepts/storage/volume-attributes-classes/
-                                  (Beta) Using this field requires the VolumeAttributesClass feature gate to be enabled (off by default).
                                 type: string
                               volumeMode:
                                 description: |-
@@ -21534,6 +21683,12 @@ var CRDsValidation map[string]string = map[string]string{
                   description: |-
                     Running state indicates the requested running state of the VirtualMachineInstance
                     mutually exclusive with Running
+                    Following are allowed values:
+                    - "Always": VMI should always be running.
+                    - "Halted": VMI should never be running.
+                    - "Manual": VMI can be started/stopped using API endpoints.
+                    - "RerunOnFailure": VMI will initially be running and restarted if a failure occurs, but will not be restarted upon successful completion.
+                    - "Once": VMI will run once and not be restarted upon completion regardless if the completion is of phase Failure or Success.
                   type: string
                 running:
                   description: |-
@@ -22236,8 +22391,8 @@ var CRDsValidation map[string]string = map[string]string{
                                     most preferred is the one with the greatest sum of weights, i.e.
                                     for each node that meets all of the scheduling requirements (resource
                                     request, requiredDuringScheduling anti-affinity expressions, etc.),
-                                    compute a sum by iterating through the elements of this field and adding
-                                    "weight" to the sum if the node has pods which matches the corresponding podAffinityTerm; the
+                                    compute a sum by iterating through the elements of this field and subtracting
+                                    "weight" from the sum if the node has pods which matches the corresponding podAffinityTerm; the
                                     node(s) with the highest sum are the most preferred.
                                   items:
                                     description: The weights of all of the matched
@@ -26448,15 +26603,13 @@ var CRDsValidation map[string]string = map[string]string{
                                       volumeAttributesClassName may be used to set the VolumeAttributesClass used by this claim.
                                       If specified, the CSI driver will create or update the volume with the attributes defined
                                       in the corresponding VolumeAttributesClass. This has a different purpose than storageClassName,
-                                      it can be changed after the claim is created. An empty string value means that no VolumeAttributesClass
-                                      will be applied to the claim but it's not allowed to reset this field to empty string once it is set.
-                                      If unspecified and the PersistentVolumeClaim is unbound, the default VolumeAttributesClass
-                                      will be set by the persistentvolume controller if it exists.
+                                      it can be changed after the claim is created. An empty string or nil value indicates that no
+                                      VolumeAttributesClass will be applied to the claim. If the claim enters an Infeasible error state,
+                                      this field can be reset to its previous value (including nil) to cancel the modification.
                                       If the resource referred to by volumeAttributesClass does not exist, this PersistentVolumeClaim will be
                                       set to a Pending state, as reflected by the modifyVolumeStatus field, until such as a resource
                                       exists.
                                       More info: https://kubernetes.io/docs/concepts/storage/volume-attributes-classes/
-                                      (Beta) Using this field requires the VolumeAttributesClass feature gate to be enabled (off by default).
                                     type: string
                                   volumeMode:
                                     description: |-
@@ -26947,6 +27100,12 @@ var CRDsValidation map[string]string = map[string]string{
                       description: |-
                         Running state indicates the requested running state of the VirtualMachineInstance
                         mutually exclusive with Running
+                        Following are allowed values:
+                        - "Always": VMI should always be running.
+                        - "Halted": VMI should never be running.
+                        - "Manual": VMI can be started/stopped using API endpoints.
+                        - "RerunOnFailure": VMI will initially be running and restarted if a failure occurs, but will not be restarted upon successful completion.
+                        - "Once": VMI will run once and not be restarted upon completion regardless if the completion is of phase Failure or Success.
                       type: string
                     running:
                       description: |-
@@ -27659,8 +27818,8 @@ var CRDsValidation map[string]string = map[string]string{
                                         most preferred is the one with the greatest sum of weights, i.e.
                                         for each node that meets all of the scheduling requirements (resource
                                         request, requiredDuringScheduling anti-affinity expressions, etc.),
-                                        compute a sum by iterating through the elements of this field and adding
-                                        "weight" to the sum if the node has pods which matches the corresponding podAffinityTerm; the
+                                        compute a sum by iterating through the elements of this field and subtracting
+                                        "weight" from the sum if the node has pods which matches the corresponding podAffinityTerm; the
                                         node(s) with the highest sum are the most preferred.
                                       items:
                                         description: The weights of all of the matched
@@ -30568,6 +30727,33 @@ var CRDsValidation map[string]string = map[string]string{
                         changedBlockTracking
                       nullable: true
                       properties:
+                        backupStatus:
+                          description: BackupStatus represents the status of vmi backup
+                          nullable: true
+                          properties:
+                            backupMsg:
+                              description: |-
+                                BackupMsg resturns any relevant information like failure reason
+                                unfreeze failed etc...
+                              type: string
+                            backupName:
+                              description: BackupName is the name of the executed
+                                backup
+                              type: string
+                            completed:
+                              description: Completed indicates the backup completed
+                              type: boolean
+                            endTimestamp:
+                              description: EndTimestamp is the timestamp when the
+                                backup ended
+                              format: date-time
+                              type: string
+                            startTimestamp:
+                              description: StartTimestamp is the timestamp when the
+                                backup started
+                              format: date-time
+                              type: string
+                          type: object
                         state:
                           description: State represents the current CBT state
                           type: string
@@ -31380,15 +31566,13 @@ var CRDsValidation map[string]string = map[string]string{
                           volumeAttributesClassName may be used to set the VolumeAttributesClass used by this claim.
                           If specified, the CSI driver will create or update the volume with the attributes defined
                           in the corresponding VolumeAttributesClass. This has a different purpose than storageClassName,
-                          it can be changed after the claim is created. An empty string value means that no VolumeAttributesClass
-                          will be applied to the claim but it's not allowed to reset this field to empty string once it is set.
-                          If unspecified and the PersistentVolumeClaim is unbound, the default VolumeAttributesClass
-                          will be set by the persistentvolume controller if it exists.
+                          it can be changed after the claim is created. An empty string or nil value indicates that no
+                          VolumeAttributesClass will be applied to the claim. If the claim enters an Infeasible error state,
+                          this field can be reset to its previous value (including nil) to cancel the modification.
                           If the resource referred to by volumeAttributesClass does not exist, this PersistentVolumeClaim will be
                           set to a Pending state, as reflected by the modifyVolumeStatus field, until such as a resource
                           exists.
                           More info: https://kubernetes.io/docs/concepts/storage/volume-attributes-classes/
-                          (Beta) Using this field requires the VolumeAttributesClass feature gate to be enabled (off by default).
                         type: string
                       volumeMode:
                         description: |-

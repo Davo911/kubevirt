@@ -15,10 +15,9 @@ import (
 	"kubevirt.io/client-go/kubecli"
 )
 
-// Deprecated: SkipTestIfNoFeatureGate should be converted to check & fail
-func SkipTestIfNoFeatureGate(featureGate string) {
+func FailTestIfNoFeatureGate(featureGate string) {
 	if !HasFeature(featureGate) {
-		ginkgo.Skip(fmt.Sprintf("the %v feature gate is not enabled.", featureGate))
+		ginkgo.Fail(fmt.Sprintf("the %v feature gate is not enabled.", featureGate))
 	}
 }
 
@@ -43,12 +42,5 @@ func SkipIfPrometheusRuleIsNotEnabled(virtClient kubecli.KubevirtClient) {
 		ginkgo.Skip("Skip monitoring tests when PrometheusRule CRD is not available in the cluster")
 	} else if err != nil {
 		gomega.Expect(err).ToNot(gomega.HaveOccurred())
-	}
-}
-
-// Deprecated: SkipIfRunningOnKindInfra should be converted to check & fail
-func SkipIfRunningOnKindInfra(message string) {
-	if IsRunningOnKindInfra() {
-		ginkgo.Skip("Skip test on kind infra: " + message)
 	}
 }

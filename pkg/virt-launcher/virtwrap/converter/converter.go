@@ -89,6 +89,7 @@ type EFIConfiguration struct {
 type ConverterContext struct {
 	Architecture                    arch.Converter
 	AllowEmulation                  bool
+	KvmAvailable                    bool
 	Secrets                         map[string]*k8sv1.Secret
 	VirtualMachine                  *v1.VirtualMachineInstance
 	CPUSet                          []int
@@ -499,12 +500,12 @@ func IsPreAllocated(path string) bool {
 }
 
 // Set optimal io mode automatically
-func SetOptimalIOMode(disk *api.Disk) error {
+func SetOptimalIOMode(disk *api.Disk, isPreAllocated func(path string) bool) {
 	var path string
 
 	// If the user explicitly set the io mode do nothing
-	if v1.DriverIO(disk.Driver.IO) != "" {
-		return nil
+	if disk.Driver.IO != "" {
+		return
 	}
 
 	if disk.Source.File != "" {
@@ -512,22 +513,21 @@ func SetOptimalIOMode(disk *api.Disk) error {
 	} else if disk.Source.Dev != "" {
 		path = disk.Source.Dev
 	} else {
-		return nil
+		return
 	}
 
 	// O_DIRECT is needed for io="native"
 	if v1.DriverCache(disk.Driver.Cache) == v1.CacheNone {
 		// set native for block device or pre-allocateed image file
-		if (disk.Source.Dev != "") || IsPreAllocated(disk.Source.File) {
+		if (disk.Source.Dev != "") || isPreAllocated(disk.Source.File) {
 			disk.Driver.IO = v1.IONative
 		}
 	}
 	// For now we don't explicitly set io=threads even for sparse files as it's
 	// not clear it's better for all use-cases
-	if v1.DriverIO(disk.Driver.IO) != "" {
+	if disk.Driver.IO != "" {
 		log.Log.Infof("Driver IO mode for %s set to %s", path, disk.Driver.IO)
 	}
-	return nil
 }
 
 func (n *deviceNamer) getExistingVolumeValue(key string) (string, bool) {
@@ -981,61 +981,6 @@ func Convert_v1_Usbredir_To_api_Usbredir(vmi *v1.VirtualMachineInstance, domainD
 	return nil
 }
 
-func convertPanicDevices(panicDevices []v1.PanicDevice) []api.PanicDevice {
-	var domainPanicDevices []api.PanicDevice
-
-	for _, panicDevice := range panicDevices {
-		domainPanicDevices = append(domainPanicDevices, api.PanicDevice{Model: panicDevice.Model})
-	}
-
-	return domainPanicDevices
-}
-
-func Convert_v1_Sound_To_api_Sound(vmi *v1.VirtualMachineInstance, domainDevices *api.Devices, _ *ConverterContext) {
-	sound := vmi.Spec.Domain.Devices.Sound
-
-	// Default is to not have any Sound device
-	if sound == nil {
-		return
-	}
-
-	model := "ich9"
-	if sound.Model == "ac97" {
-		model = "ac97"
-	}
-
-	soundCards := make([]api.SoundCard, 1)
-	soundCards[0] = api.SoundCard{
-		Alias: api.NewUserDefinedAlias(sound.Name),
-		Model: model,
-	}
-
-	domainDevices.SoundCards = soundCards
-}
-
-func Convert_v1_Input_To_api_InputDevice(input *v1.Input, inputDevice *api.Input) error {
-	if input.Bus != v1.InputBusVirtio && input.Bus != v1.InputBusUSB && input.Bus != "" {
-		return fmt.Errorf("input contains unsupported bus %s", input.Bus)
-	}
-
-	if input.Bus != v1.InputBusVirtio && input.Bus != v1.InputBusUSB {
-		input.Bus = v1.InputBusUSB
-	}
-
-	if input.Type != v1.InputTypeTablet {
-		return fmt.Errorf("input contains unsupported type %s", input.Type)
-	}
-
-	inputDevice.Bus = input.Bus
-	inputDevice.Type = input.Type
-	inputDevice.Alias = api.NewUserDefinedAlias(input.Name)
-
-	if input.Bus == v1.InputBusVirtio {
-		inputDevice.Model = v1.VirtIO
-	}
-	return nil
-}
-
 func convertFeatureState(source *v1.FeatureState) *api.FeatureState {
 	if source != nil {
 		return &api.FeatureState{
@@ -1136,24 +1081,6 @@ func convertV1ToAPISyNICTimer(syNICTimer *v1.SyNICTimer) *api.SyNICTimer {
 		}
 	}
 	return result
-}
-
-func ConvertV1ToAPIBalloning(source *v1.Devices, ballooning *api.MemBalloon, c *ConverterContext) {
-	if source != nil && source.AutoattachMemBalloon != nil && !*source.AutoattachMemBalloon {
-		ballooning.Model = "none"
-		ballooning.Stats = nil
-	} else {
-		ballooning.Model = virtio.InterpretTransitionalModelType(&c.UseVirtioTransitional, c.Architecture.GetArchitecture())
-		if c.MemBalloonStatsPeriod != 0 {
-			ballooning.Stats = &api.Stats{Period: c.MemBalloonStatsPeriod}
-		}
-		if c.UseLaunchSecuritySEV || c.UseLaunchSecurityPV {
-			ballooning.Driver = &api.MemBalloonDriver{
-				IOMMU: "on",
-			}
-		}
-		ballooning.FreePageReporting = boolToOnOff(&c.FreePageReporting, false)
-	}
 }
 
 func initializeQEMUCmdAndQEMUArg(domain *api.Domain) {
@@ -1484,6 +1411,7 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 		),
 		compute.TPMDomainConfigurator{},
 		compute.VSOCKDomainConfigurator{},
+		compute.NewHypervisorDomainConfigurator(c.AllowEmulation, c.KvmAvailable),
 		compute.NewLaunchSecurityDomainConfigurator(architecture),
 		compute.ChannelsDomainConfigurator{},
 		compute.ClockDomainConfigurator{},
@@ -1493,6 +1421,25 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 			compute.RNGWithUseLaunchSecuritySEV(c.UseLaunchSecuritySEV),
 			compute.RNGWithUseLaunchSecurityPV(c.UseLaunchSecurityPV),
 		),
+		compute.NewInputDeviceDomainConfigurator(architecture),
+		compute.NewBalloonDomainConfigurator(
+			compute.BalloonWithArchitecture(architecture),
+			compute.BalloonWithUseVirtioTransitional(c.UseVirtioTransitional),
+			compute.BalloonWithUseLaunchSecuritySEV(c.UseLaunchSecuritySEV),
+			compute.BalloonWithUseLaunchSecurityPV(c.UseLaunchSecurityPV),
+			compute.BalloonWithFreePageReporting(c.FreePageReporting),
+			compute.BalloonWithMemBalloonStatsPeriod(c.MemBalloonStatsPeriod),
+		),
+		compute.NewGraphicsDomainConfigurator(architecture, c.BochsForEFIGuests),
+		compute.SoundDomainConfigurator{},
+		compute.NewHostDeviceDomainConfigurator(
+			c.GenericHostDevices,
+			c.GPUHostDevices,
+			c.SRIOVDevices,
+		),
+		compute.NewWatchdogDomainConfigurator(architecture),
+		compute.NewConsoleDomainConfigurator(c.SerialConsoleLog),
+		compute.PanicDevicesDomainConfigurator{},
 	)
 	if err := builder.Build(vmi, domain); err != nil {
 		return err
@@ -1513,19 +1460,6 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 	// set the maximum number of sockets here to allow hot-plug CPUs
 	if vmiCPU := vmi.Spec.Domain.CPU; vmiCPU != nil && vmiCPU.MaxSockets != 0 && c.Architecture.SupportCPUHotplug() {
 		domainVCPUTopologyForHotplug(vmi, domain)
-	}
-
-	kvmPath := "/dev/kvm"
-	if _, err := os.Stat(kvmPath); errors.Is(err, os.ErrNotExist) {
-		if c.AllowEmulation {
-			logger := log.DefaultLogger()
-			logger.Infof("Hardware emulation device '%s' not present. Using software emulation.", kvmPath)
-			domain.Spec.Type = "qemu"
-		} else {
-			return fmt.Errorf("hardware emulation device '%s' not present", kvmPath)
-		}
-	} else if err != nil {
-		return err
 	}
 
 	domain.Spec.SysInfo = &api.SysInfo{}
@@ -1715,35 +1649,6 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 	// Handle virtioFS
 	domain.Spec.Devices.Filesystems = append(domain.Spec.Devices.Filesystems, convertFileSystems(vmi.Spec.Domain.Devices.Filesystems)...)
 
-	domain.Spec.Devices.PanicDevices = append(domain.Spec.Devices.PanicDevices, convertPanicDevices(vmi.Spec.Domain.Devices.PanicDevices)...)
-
-	Convert_v1_Sound_To_api_Sound(vmi, &domain.Spec.Devices, c)
-
-	if vmi.Spec.Domain.Devices.Watchdog != nil {
-		newWatchdog := &api.Watchdog{}
-		err := c.Architecture.ConvertWatchdog(vmi.Spec.Domain.Devices.Watchdog, newWatchdog)
-		if err != nil {
-			return err
-		}
-		domain.Spec.Devices.Watchdogs = append(domain.Spec.Devices.Watchdogs, *newWatchdog)
-	}
-
-	domain.Spec.Devices.Ballooning = &api.MemBalloon{}
-	ConvertV1ToAPIBalloning(&vmi.Spec.Domain.Devices, domain.Spec.Devices.Ballooning, c)
-
-	if vmi.Spec.Domain.Devices.Inputs != nil {
-		inputDevices := make([]api.Input, 0)
-		for i := range vmi.Spec.Domain.Devices.Inputs {
-			inputDevice := api.Input{}
-			err := Convert_v1_Input_To_api_InputDevice(&vmi.Spec.Domain.Devices.Inputs[i], &inputDevice)
-			if err != nil {
-				return err
-			}
-			inputDevices = append(inputDevices, inputDevice)
-		}
-		domain.Spec.Devices.Inputs = inputDevices
-	}
-
 	err = Convert_v1_Usbredir_To_api_Usbredir(vmi, &domain.Spec.Devices, c)
 	if err != nil {
 		return err
@@ -1849,9 +1754,6 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 		}
 	}
 
-	domain.Spec.Devices.HostDevices = append(domain.Spec.Devices.HostDevices, c.GenericHostDevices...)
-	domain.Spec.Devices.HostDevices = append(domain.Spec.Devices.HostDevices, c.GPUHostDevices...)
-
 	if vmi.Spec.Domain.CPU == nil || vmi.Spec.Domain.CPU.Model == "" {
 		domain.Spec.CPU.Mode = v1.CPUModeHostModel
 	}
@@ -1864,66 +1766,7 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 			Model:  virtio.InterpretTransitionalModelType(&c.UseVirtioTransitional, c.Architecture.GetArchitecture()),
 			Driver: controllerDriver,
 		})
-
-		var serialPort uint = 0
-		var serialType string = "serial"
-		domain.Spec.Devices.Consoles = []api.Console{
-			{
-				Type: "pty",
-				Target: &api.ConsoleTarget{
-					Type: &serialType,
-					Port: &serialPort,
-				},
-			},
-		}
-
-		socketPath := fmt.Sprintf("%s/%s/virt-serial%d", util.VirtPrivateDir, vmi.ObjectMeta.UID, serialPort)
-		domain.Spec.Devices.Serials = []api.Serial{
-			{
-				Type: "unix",
-				Target: &api.SerialTarget{
-					Port: &serialPort,
-				},
-				Source: &api.SerialSource{
-					Mode: "bind",
-					Path: socketPath,
-				},
-			},
-		}
-
-		if c.SerialConsoleLog {
-			domain.Spec.Devices.Serials[0].Log = &api.SerialLog{
-				File:   fmt.Sprintf("%s-log", socketPath),
-				Append: "on",
-			}
-		}
-
 	}
-
-	if vmi.Spec.Domain.Devices.AutoattachGraphicsDevice == nil || *vmi.Spec.Domain.Devices.AutoattachGraphicsDevice {
-		c.Architecture.AddGraphicsDevice(vmi, domain, c.BochsForEFIGuests && vmi.IsBootloaderEFI())
-		if vmi.Spec.Domain.Devices.Video != nil {
-			video := api.Video{
-				Model: api.VideoModel{
-					Type:  vmi.Spec.Domain.Devices.Video.Type,
-					VRam:  pointer.P(uint(16384)),
-					Heads: pointer.P(uint(1)),
-				},
-			}
-			domain.Spec.Devices.Video = []api.Video{video}
-		}
-		domain.Spec.Devices.Graphics = []api.Graphics{
-			{
-				Listen: &api.GraphicsListen{
-					Type:   "socket",
-					Socket: fmt.Sprintf("/var/run/kubevirt-private/%s/virt-vnc", vmi.ObjectMeta.UID),
-				},
-				Type: "vnc",
-			},
-		}
-	}
-
-	domain.Spec.Devices.HostDevices = append(domain.Spec.Devices.HostDevices, c.SRIOVDevices...)
 
 	// Add Ignition Command Line if present
 	ignitiondata := vmi.Annotations[v1.IgnitionAnnotation]
