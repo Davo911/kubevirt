@@ -48,6 +48,32 @@ const (
 	VirtioVolumeSize = "750Mi"
 )
 
+type containerDiskSpec struct {
+	image string
+	tag   string
+}
+
+func (s containerDiskSpec) fullImage(registry string) string {
+	tag := s.tag
+	if tag == "" {
+		tag = flags.KubeVirtUtilityVersionTag
+	}
+
+	return fmt.Sprintf("%s/%s:%s", registry, s.image, tag)
+}
+
+var containerDiskSpecs = map[ContainerDisk]containerDiskSpec{
+	ContainerDiskCirros:               {image: fmt.Sprintf("%s-container-disk-demo", ContainerDiskCirros)},
+	ContainerDiskAlpine:               {image: fmt.Sprintf("%s-container-disk-demo", ContainerDiskAlpine)},
+	ContainerDiskCirrosCustomLocation: {image: fmt.Sprintf("%s-container-disk-demo", ContainerDiskCirrosCustomLocation)},
+	ContainerDiskVirtio:               {image: string(ContainerDiskVirtio)},
+	ContainerDiskFedoraTestTooling:    {image: fmt.Sprintf("%s-container-disk", ContainerDiskFedoraTestTooling)},
+	ContainerDiskFedoraRealtime:       {image: fmt.Sprintf("%s-container-disk", ContainerDiskFedoraRealtime)},
+	ContainerDiskAlpineTestTooling:    {image: fmt.Sprintf("%s-container-disk", ContainerDiskAlpineTestTooling)},
+	KernelBoot:                        {image: string(KernelBoot)},
+	KernelBootS390xGuestless:          {image: string(KernelBootS390xGuestless), tag: "latest"},
+}
+
 // ContainerDiskFor takes the name of an image and returns the full
 // registry diks image path.
 // Use the ContainerDisk* constants as input values.
@@ -64,20 +90,12 @@ func DataVolumeImportUrlFromRegistryForContainerDisk(registry string, name Conta
 }
 
 func ContainerDiskFromRegistryFor(registry string, name ContainerDisk) string {
-	switch name {
-	case ContainerDiskCirros, ContainerDiskAlpine, ContainerDiskCirrosCustomLocation:
-		return fmt.Sprintf("%s/%s-container-disk-demo:%s", registry, name, flags.KubeVirtUtilityVersionTag)
-	case ContainerDiskVirtio:
-		return fmt.Sprintf("%s/virtio-container-disk:%s", registry, flags.KubeVirtUtilityVersionTag)
-	case ContainerDiskFedoraTestTooling, ContainerDiskFedoraRealtime, ContainerDiskAlpineTestTooling:
-		return fmt.Sprintf("%s/%s-container-disk:%s", registry, name, flags.KubeVirtUtilityVersionTag)
-	case KernelBoot:
-		return fmt.Sprintf("%s/alpine-ext-kernel-boot-demo:%s", registry, flags.KubeVirtUtilityVersionTag)
-	case KernelBootS390xGuestless:
-		return fmt.Sprintf("%s/kubevirt_s390x_guestless_loop:%s", registry, "latest")
+	spec, found := containerDiskSpecs[name]
+	if !found {
+		panic(fmt.Sprintf("Unsupported registry disk %s", name))
 	}
 
-	panic(fmt.Sprintf("Unsupported registry disk %s", name))
+	return spec.fullImage(registry)
 }
 
 func ContainerDiskSizeBySourceURL(url string) string {
